@@ -29,9 +29,21 @@ there is exactly one module-matrix type in the repo.
   errors — all inherited from `dotnet/Directory.Build.props`; do not
   override those in new projects except where this plan says to.
 - `EspBarcode.Generator` uses `System.Drawing.Common`, which is
-  Windows-only at runtime. Mark the assembly
-  `[assembly: SupportedOSPlatform("windows")]` so the platform-compat
-  analyzer (CA1416) doesn't fail the `TreatWarningsAsErrors` build.
+  Windows-only at runtime. **Do not mark this at the assembly level** —
+  an assembly-wide `[assembly: SupportedOSPlatform("windows")]` marks
+  every public member of that assembly (including plain logic like
+  `RawMatrix`) as platform-restricted for the CA1416 analyzer, which
+  cascades into forcing every consumer (`EspBarcode.Client`,
+  `EspBarcode.Cli`, both otherwise cross-platform-capable via
+  `System.IO.Ports`) to also become Windows-only just to build under
+  `TreatWarningsAsErrors` — an architecture decision this plan never
+  intended and Task 1's review caught. Apply `[SupportedOSPlatform("windows")]`
+  narrowly, at the class level, only on `BarcodeImageRenderer` (Task 8),
+  the one type that actually calls into `System.Drawing`. Everything
+  else in `EspBarcode.Generator` (`RawMatrix`, `BarcodeType`,
+  `BarcodeSpec`, the encoders, `ScreenFitLayout`, `Checksums`,
+  `PayloadSource`) has no Windows-specific API calls and must stay
+  analyzer-clean without any platform attribute.
 - `BarcodeSpec` field names/defaults/ranges must exactly match
   `docs/PROTOCOL.md`'s `generate` command fields (same option vocabulary
   across firmware, Python tool, `EspBarcode.Client`, and this new tool).
@@ -100,11 +112,17 @@ there is exactly one module-matrix type in the repo.
 ```csharp
 // dotnet/src/EspBarcode.Generator/AssemblyInfo.cs
 using System.Runtime.CompilerServices;
-using System.Runtime.Versioning;
 
 [assembly: InternalsVisibleTo("EspBarcode.Generator.Tests")]
-[assembly: SupportedOSPlatform("windows")]
 ```
+
+No platform attribute here — see the amended Global Constraints note:
+`RawMatrix` (this task) has no Windows-specific API calls, and marking
+the whole assembly `SupportedOSPlatform("windows")` would force
+`EspBarcode.Client`/`EspBarcode.Cli` to also become Windows-only just to
+build under `TreatWarningsAsErrors`, which this task must not do. Only
+`BarcodeImageRenderer` (Task 8) needs a `[SupportedOSPlatform("windows")]`
+attribute, applied at the class level.
 
 - [ ] **Step 3: Move `RawMatrix.cs`**
 
