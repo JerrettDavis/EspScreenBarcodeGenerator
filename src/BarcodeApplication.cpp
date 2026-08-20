@@ -1,11 +1,14 @@
 #include "BarcodeApplication.h"
 
+#include <esp_system.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdio>
 #include <utility>
 
+#include "RandomPayload.h"
 #include "app_config.h"
 
 using namespace espbarcode;
@@ -22,18 +25,26 @@ constexpr uint16_t kText = TFT_WHITE;
 constexpr uint16_t kMuted = 0xBDF7;
 constexpr int kKeyboardTop = 238;
 constexpr int kKeyboardRowHeight = 48;
+// Extra hit-test tolerance for the home screen's small, tightly-packed
+// buttons (e.g. CLEAR is only 70px wide with 8px gaps on either side).
+constexpr int16_t kTouchPad = 4;
 
 constexpr BarcodeApplication::Rect kTypeButton{8, 38, 150, 38};
 constexpr BarcodeApplication::Rect kClearButton{166, 38, 70, 38};
 constexpr BarcodeApplication::Rect kSaveButton{244, 38, 68, 38};
 constexpr BarcodeApplication::Rect kDataBox{8, 82, 304, 88};
-constexpr BarcodeApplication::Rect kOptionsButton{8, 176, 95, 38};
-constexpr BarcodeApplication::Rect kPresetsButton{111, 176, 95, 38};
-constexpr BarcodeApplication::Rect kGenerateButton{214, 176, 98, 38};
+constexpr BarcodeApplication::Rect kOptionsButton{8, 176, 70, 38};
+constexpr BarcodeApplication::Rect kPresetsButton{86, 176, 70, 38};
+constexpr BarcodeApplication::Rect kDisplayButton{164, 176, 70, 38};
+constexpr BarcodeApplication::Rect kRandomButton{242, 176, 70, 38};
 
 std::string clipped(const std::string& value, std::size_t max) {
     if (value.size() <= max) return value;
     return value.substr(0, max - 3) + "...";
+}
+
+std::string randomPayloadFor(Symbology type) {
+    return randomValidPayload(type, [] { return static_cast<uint32_t>(esp_random()); });
 }
 
 std::string printablePreview(const std::string& value) {
@@ -166,7 +177,8 @@ void BarcodeApplication::drawHome() {
 
     drawButton(kOptionsButton, "OPTIONS");
     drawButton(kPresetsButton, "PRESETS");
-    drawButton(kGenerateButton, "DISPLAY", true, kAccentDark);
+    drawButton(kDisplayButton, "DISPLAY", true, kAccentDark);
+    drawButton(kRandomButton, "RANDOM", false, kWarning);
     drawStatus();
     drawKeyboard();
 }
@@ -242,29 +254,33 @@ void BarcodeApplication::drawKeyboard() {
 }
 
 void BarcodeApplication::handleHomeTouch(uint16_t x, uint16_t y) {
-    if (kTypeButton.contains(x, y)) {
+    if (kTypeButton.contains(x, y, kTouchPad)) {
         view_ = View::TypePicker;
         drawTypePicker();
-    } else if (kClearButton.contains(x, y)) {
+    } else if (kClearButton.contains(x, y, kTouchPad)) {
         spec_.data.clear();
         setStatus("Payload cleared", false);
         drawDataPreview();
         drawStatus();
-    } else if (kSaveButton.contains(x, y)) {
+    } else if (kSaveButton.contains(x, y, kTouchPad)) {
         const std::string slot = presets_.nextSlotName();
         std::string error;
         if (slot.empty()) setStatus("All 32 preset slots are occupied");
         else if (presets_.save(slot, spec_, error)) setStatus("Saved as " + slot);
         else setStatus("Save failed: " + error);
-    } else if (kOptionsButton.contains(x, y)) {
+    } else if (kOptionsButton.contains(x, y, kTouchPad)) {
         view_ = View::Options;
         drawOptions();
-    } else if (kPresetsButton.contains(x, y)) {
+    } else if (kPresetsButton.contains(x, y, kTouchPad)) {
         view_ = View::Presets;
         presetPage_ = 0;
         presetDeleteMode_ = false;
         drawPresets();
-    } else if (kGenerateButton.contains(x, y)) {
+    } else if (kDisplayButton.contains(x, y, kTouchPad)) {
+        std::string error;
+        if (!generate(spec_, true, error)) setStatus("Error: " + error);
+    } else if (kRandomButton.contains(x, y, kTouchPad)) {
+        spec_.data = randomPayloadFor(spec_.type);
         std::string error;
         if (!generate(spec_, true, error)) setStatus("Error: " + error);
     } else if (y >= kKeyboardTop) {

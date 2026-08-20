@@ -1,8 +1,10 @@
 #include "EspBarcodeCore.h"
+#include "RandomPayload.h"
 
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -194,6 +196,36 @@ void testLimits() {
     CHECK(!result.ok);
     CHECK(result.error.find("2048") != std::string::npos);
 }
+
+void testRandomPayload() {
+    // QrCode is skipped here for the same reason as testMatrixEncoders(): the
+    // CMake native-validation build doesn't vendor ricmoo/QRCode, so the QR
+    // encoder always returns "dependency is unavailable" outside PlatformIO.
+    static constexpr Symbology kAllTypes[] = {
+#if __has_include(<qrcode.h>)
+        Symbology::QrCode,
+#endif
+        Symbology::DataMatrix, Symbology::Aztec,
+        Symbology::Code128, Symbology::Gs1_128, Symbology::Code39,
+        Symbology::Ean13, Symbology::Ean8, Symbology::UpcA,
+        Symbology::Itf, Symbology::Itf14, Symbology::Codabar, Symbology::Msi
+    };
+
+    std::mt19937 rng(987654321U);
+    const std::function<uint32_t()> nextRandom = [&rng] { return rng(); };
+
+    for (Symbology type : kAllTypes) {
+        for (int attempt = 0; attempt < 25; ++attempt) {
+            const std::string payload = randomValidPayload(type, nextRandom);
+            const auto result = make(type, payload);
+            if (!result.ok) {
+                std::cerr << "random payload for " << toString(type) << " ('" << payload
+                           << "') failed to encode: " << result.error << '\n';
+            }
+            CHECK(result.ok);
+        }
+    }
+}
 }
 
 int main() {
@@ -204,6 +236,7 @@ int main() {
     testMatrixEncoders();
     testLayout();
     testLimits();
+    testRandomPayload();
     if (failures != 0) {
         std::cerr << failures << " native core test(s) failed\n";
         return EXIT_FAILURE;

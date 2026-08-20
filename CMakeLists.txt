@@ -13,6 +13,7 @@ set(ESPBARCODE_CORE_SOURCES
     lib/EspBarcodeCore/src/MatrixEncoders.cpp
     lib/EspBarcodeCore/src/AztecEncoder.cpp
     lib/EspBarcodeCore/src/QrEncoder.cpp
+    lib/EspBarcodeCore/src/RandomPayload.cpp
 )
 
 add_library(EspBarcodeCore STATIC ${ESPBARCODE_CORE_SOURCES})

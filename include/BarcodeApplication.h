@@ -9,6 +9,7 @@
 
 #include "EspBarcodeCore.h"
 #include "PresetStore.h"
+#include "UiRect.h"
 
 class BarcodeApplication {
 public:
@@ -41,15 +42,7 @@ public:
     const std::string& statusText() const { return status_; }
     PresetStore& presets() { return presets_; }
 
-    struct Rect {
-        int16_t x;
-        int16_t y;
-        int16_t w;
-        int16_t h;
-        bool contains(uint16_t px, uint16_t py) const {
-            return px >= x && py >= y && px < x + w && py < y + h;
-        }
-    };
+    using Rect = uigeom::Rect;
 
 private:
     enum class View : uint8_t { Home, TypePicker, Options, Presets, Barcode };
