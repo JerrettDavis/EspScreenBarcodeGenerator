@@ -18,6 +18,7 @@ internal static class CliApp
             {
                 "generate" => RunGenerate(args),
                 "close" => ViewerClient.Close(args[1..]),
+                "list-types" => RunListTypes(),
                 _ => Unknown(args[0]),
             };
         }
@@ -26,6 +27,15 @@ internal static class CliApp
             Console.Error.WriteLine($"error [{ex.Code}]: {ex.Message}");
             return 1;
         }
+    }
+
+    public static IReadOnlyList<string> ListTypeWireValues()
+        => Enum.GetValues<EspBarcode.Generator.BarcodeType>().Select(t => t.ToWireValue()).ToArray();
+
+    private static int RunListTypes()
+    {
+        foreach (var value in ListTypeWireValues()) Console.WriteLine(value);
+        return 0;
     }
 
     private static int RunGenerate(string[] args)
