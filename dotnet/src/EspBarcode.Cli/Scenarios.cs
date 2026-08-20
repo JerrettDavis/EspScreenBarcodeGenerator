@@ -1,5 +1,4 @@
 using EspBarcode.Client;
-using EspBarcode.Generator;
 using ZXing;
 using ZXing.PDF417;
 
@@ -67,13 +66,13 @@ internal static class Scenarios
         Console.WriteLine("demo complete");
     }
 
-    internal static RawMatrix EncodePdf417(string payload)
+    internal static EspBarcode.Generator.RawMatrix EncodePdf417(string payload)
     {
         var writer = new PDF417Writer();
         var hints = new Dictionary<EncodeHintType, object> { [EncodeHintType.MARGIN] = 0 };
         var bitMatrix = writer.encode(payload, BarcodeFormat.PDF_417, 0, 0, hints);
 
-        var matrix = new RawMatrix(bitMatrix.Width, bitMatrix.Height);
+        var matrix = new EspBarcode.Generator.RawMatrix(bitMatrix.Width, bitMatrix.Height);
         for (var y = 0; y < bitMatrix.Height; y++)
         {
             for (var x = 0; x < bitMatrix.Width; x++)
