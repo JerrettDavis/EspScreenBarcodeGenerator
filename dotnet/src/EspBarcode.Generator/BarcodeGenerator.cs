@@ -14,7 +14,26 @@ public static class BarcodeGenerator
                 "Aztec Rune (aztec_layers=0) is not supported by the standalone generator; use a positive aztec_layers value.");
         }
 
-        return spec.Type switch
+        try
+        {
+            return Dispatch(spec);
+        }
+        // ZXing.Net reports every payload it cannot encode - empty data, characters outside the
+        // symbology's alphabet, data longer than the symbology allows - by throwing out of
+        // writer.encode. Probing all 14 encoders with malformed input showed exactly two types
+        // escape: ArgumentException (most writers) and WriterException (PDF417). Translating them
+        // here, at the single choke point, is what lets every caller handle a bad payload through
+        // the one BarcodeGenerationException contract instead of crashing on a raw ZXing type.
+        // ArgumentOutOfRangeException is excluded so Dispatch's unknown-symbology guard below - a
+        // programming error, not bad user data - is never mislabelled as a payload problem.
+        catch (Exception ex) when (ex is ZXing.WriterException || (ex is ArgumentException and not ArgumentOutOfRangeException))
+        {
+            throw new BarcodeGenerationException("invalid_payload", ex.Message);
+        }
+    }
+
+    private static RawMatrix Dispatch(BarcodeSpec spec) =>
+        spec.Type switch
         {
             BarcodeType.Qr => MatrixEncoders.EncodeQr(spec),
             BarcodeType.DataMatrix => MatrixEncoders.EncodeDataMatrix(spec),
@@ -32,5 +51,4 @@ public static class BarcodeGenerator
             BarcodeType.Msi => LinearEncoders.EncodeMsi(spec),
             _ => throw new ArgumentOutOfRangeException(nameof(spec), spec.Type, "Unknown barcode type"),
         };
-    }
 }

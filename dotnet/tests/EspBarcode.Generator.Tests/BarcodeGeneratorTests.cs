@@ -20,4 +20,35 @@ public class BarcodeGeneratorTests
         var ex = Assert.Throws<BarcodeGenerationException>(() => BarcodeGenerator.Encode(spec));
         Assert.Equal("aztec_rune_unsupported", ex.Code);
     }
+
+    // ZXing throws its own exception types straight out of writer.encode for a payload it cannot
+    // represent. Encode has to translate them, or every caller has to know about ZXing: the CLI
+    // catches only BarcodeGenerationException and would otherwise die with a raw stack trace.
+    // ArgumentException and WriterException are the two types that were observed escaping when all
+    // 14 encoders were probed with malformed input; one case of each is covered here.
+    [Theory]
+    [InlineData(BarcodeType.Code39, "héllo!*%")]      // ArgumentException: non-encodable character
+    [InlineData(BarcodeType.Codabar, "abc-def")]      // ArgumentException: cannot encode
+    [InlineData(BarcodeType.Code128, "日本語テキスト")]   // ArgumentException: bad character in input
+    [InlineData(BarcodeType.Qr, "")]                  // ArgumentException: empty contents
+    [InlineData(BarcodeType.Pdf417, "日本語テキスト")]    // ZXing.WriterException: non-encodable character
+    public void Encode_PayloadZXingCannotRepresent_ThrowsInvalidPayload(BarcodeType type, string data)
+    {
+        var ex = Assert.Throws<BarcodeGenerationException>(() => BarcodeGenerator.Encode(new BarcodeSpec { Type = type, Data = data }));
+        Assert.Equal("invalid_payload", ex.Code);
+        Assert.NotEmpty(ex.Message); // the underlying reason is carried through, not discarded
+    }
+
+    [Fact]
+    public void Encode_PayloadRejectedByChecksums_KeepsItsOwnMoreSpecificCode()
+    {
+        // The wrapping catch must not swallow the codes the generator already reports itself.
+        var ex = Assert.Throws<BarcodeGenerationException>(() =>
+            BarcodeGenerator.Encode(new BarcodeSpec { Type = BarcodeType.Ean13, Data = "ABCDEFGHIJKLM" }));
+        Assert.Equal("invalid_payload", ex.Code);
+
+        var qr = Assert.Throws<BarcodeGenerationException>(() =>
+            BarcodeGenerator.Encode(new BarcodeSpec { Type = BarcodeType.Qr, Data = new string('X', 5000), QrMaxVersion = 5 }));
+        Assert.Equal("data_too_long", qr.Code);
+    }
 }
