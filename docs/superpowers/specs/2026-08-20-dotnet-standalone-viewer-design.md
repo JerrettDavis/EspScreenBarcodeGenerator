@@ -103,13 +103,23 @@ Windows-primary) continues to build and test green on every push/PR to
     handing off to the matching ZXing.Net writer (`MSIWriter` does
     support MSI *encoding* — confirmed in source — but does not compute
     the check digit itself, so `EspBarcode.Generator` does).
-  - **Aztec Rune** (`AztecLayers == 0`): no ZXing.Net writer exists for
-    this upstream (confirmed: the Java zxing project only ever tracked
-    Rune *decoding*, never encoding). Implemented as a small hand-rolled
-    encoder in `EspBarcode.Generator` per the published Aztec Rune layout
-    (11x11 compact Aztec-style symbol encoding a single mode message for
-    a 0-255 value) — this is the one symbology needing custom code,
-    mirroring the firmware's own single host-only gap (PDF417).
+  - **Aztec Rune** (`AztecLayers == 0`): **not supported in v1.** No
+    ZXing.Net writer exists for it (confirmed: upstream zxing only ever
+    tracked Rune *decoding*, never encoding), and the firmware's own Rune
+    encoder (`lib/EspBarcodeCore/src/AztecEncoder.cpp`) is a ~300-line
+    hand-rolled Aztec + Reed-Solomon implementation, not a small isolated
+    routine — porting it blind carries real correctness risk, and since
+    no ZXing.Net (or any other available) decoder can read Aztec Runes
+    either, a ported encoder's output could not be round-trip-verified by
+    this plan's test suite. Rather than ship an unverifiable niche
+    encoder, `EspBarcode.Generator` throws a clear
+    `BarcodeGenerationException` ("Aztec Rune (aztec_layers=0) is not
+    supported by the standalone generator; use a positive aztec_layers
+    value.") for this one case. This mirrors the firmware's own single
+    host-only gap (PDF417, which the firmware punts to raw-matrix
+    upload) — every real tool in this protocol family has exactly one
+    symbology it hands off instead of implementing. A future revision
+    could revisit this alongside real hardware/scanner verification.
 - **`ScreenFitLayout.Fit(RawMatrix, targetWidth, targetHeight, rotation)
   -> RenderedLayout`** — reimplementation of the firmware's
   `calculateLayout` (`docs/ARCHITECTURE.md`, "Rendering pipeline"): picks
@@ -215,13 +225,17 @@ modes"):
 
 ## Testing
 
-- `EspBarcode.Generator.Tests`: per-symbology encode tests (including
-  check-digit computation for UPC-A/EAN-13/EAN-8/ITF-14/MSI, GS1-128 FNC1
-  handling, Data Matrix rectangular shape, Aztec Rune encode/decode round
-  trip against a hand-verified table), `ScreenFitLayout` rotation/scale
-  math (including the "too dense, fails" case), PNG renderer output
-  shape, and `PayloadSource` `@file` resolution. Fully headless, runs on
-  any OS.
+- `EspBarcode.Generator.Tests`: per-symbology encode tests, each verified
+  by round-tripping the generated `RawMatrix` back through ZXing.Net's own
+  `BarcodeReader` and asserting the decoded text matches (rather than
+  hand-computing expected bit patterns, which is fragile) — including
+  check-digit computation for UPC-A/EAN-13/EAN-8/ITF-14/MSI (unit-tested
+  directly against hand-verified GS1/Luhn vectors), GS1-128 FNC1 handling,
+  and Data Matrix rectangular shape. Plus an explicit test that
+  `AztecLayers == 0` throws the documented "not supported" exception.
+  `ScreenFitLayout` rotation/scale math (including the "too dense, fails"
+  case), PNG renderer output shape, and `PayloadSource` `@file`
+  resolution. Fully headless, runs on any OS.
 - `EspBarcode.Viewer.Cli.Tests`: arg parsing, `--open` mode branching,
   and the health-probe/launch/POST HTTP flow against a fake
   `HttpMessageHandler` (no real GUI process spawned in tests).
