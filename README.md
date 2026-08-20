@@ -148,6 +148,11 @@ The CLI's `demo` command exercises QR, UPC-A, and Code 128 generation on-device,
 ZXing.Net (the firmware can't generate PDF417 on-board) and uploads it through the
 raw-matrix protocol. See [`dotnet/README.md`](dotnet/README.md) for details.
 
+A standalone generator/viewer (`EspBarcode.Viewer.Cli` +
+`EspBarcode.Viewer.Gui`) replicates the ESP's barcode generation and
+display behavior without any device connected — see
+[`dotnet/README.md`](dotnet/README.md#standalone-generatorviewer-no-esp-required).
+
 ## Symbology behavior
 
 | Type | Device name | Important behavior |
