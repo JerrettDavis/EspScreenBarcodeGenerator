@@ -1,4 +1,5 @@
 using EspBarcode.Cli;
+using EspBarcode.Generator;
 
 namespace EspBarcode.Client.Tests;
 

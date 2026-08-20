@@ -1,4 +1,4 @@
-namespace EspBarcode.Client.Tests;
+namespace EspBarcode.Generator.Tests;
 
 public class RawMatrixTests
 {

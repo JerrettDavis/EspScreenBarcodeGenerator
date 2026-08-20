@@ -1,4 +1,4 @@
-namespace EspBarcode.Client;
+namespace EspBarcode.Generator;
 
 /// <summary>
 /// A logical module matrix, packed MSB-first in continuous row-major order to

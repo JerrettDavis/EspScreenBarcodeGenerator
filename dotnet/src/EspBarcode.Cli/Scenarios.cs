@@ -1,4 +1,5 @@
 using EspBarcode.Client;
+using EspBarcode.Generator;
 using ZXing;
 using ZXing.PDF417;
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using EspBarcode.Generator;
 
 namespace EspBarcode.Client.Tests;
 

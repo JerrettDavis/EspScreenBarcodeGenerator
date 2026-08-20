@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using EspBarcode.Client.Transport;
+using EspBarcode.Generator;
 
 namespace EspBarcode.Client;
 
