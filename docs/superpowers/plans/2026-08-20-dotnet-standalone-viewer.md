@@ -1,5 +1,23 @@
 # Standalone .NET Barcode Generator & Viewer Implementation Plan
 
+> **Amendment (during Task 11 execution):** Tasks 6 (`ScreenFitLayout`) and
+> 8 (`BarcodeImageRenderer`) as originally written did not special-case
+> linear (1D) symbologies — `RawMatrix.Height` is always 1 for these, and
+> using it directly for both scale-fit and per-module square rendering
+> produces an unscannable 1-scale-pixel-tall hairline for 9 of the 14
+> supported types (everything except Qr/DataMatrix/Aztec/Pdf417). The
+> firmware itself avoids this by treating linear symbols as having a fixed
+> **48-module conceptual bar height** for all layout/scale math and
+> drawing bars that span the full `48 * scale` pixels tall, not `1 *
+> scale` (`lib/EspBarcodeCore/src/EspBarcodeCore.cpp:150-187`,
+> `src/BarcodeApplication.cpp:652-686`). Both tasks' code below is
+> corrected in place to match: `ScreenFitLayout` substitutes 48 for
+> whichever of Width/Height is exactly 1 (a safe linear-symbol detector,
+> since no supported 2D symbol ever has a dimension of 1), and
+> `BarcodeImageRenderer` draws linear symbols as column-wise (or, if
+> rotated, row-wise) bars spanning that full conceptual height instead of
+> per-cell squares.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a standalone .NET CLI + WPF viewer that generate and display
