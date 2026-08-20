@@ -71,4 +71,78 @@ public class SpecArgsTests
         var ex = Assert.Throws<BarcodeGenerationException>(() => SpecArgs.Parse(["generate", "qr"]));
         Assert.Equal("invalid_args", ex.Code);
     }
+
+    [Theory]
+    [InlineData("--quiet")]
+    [InlineData("--min-module")]
+    [InlineData("--qr-min-version")]
+    [InlineData("--qr-max-version")]
+    [InlineData("--aztec-security")]
+    [InlineData("--aztec-layers")]
+    public void Parse_NonNumericValueForNumericOption_ThrowsInvalidArgs(string option)
+    {
+        // int.Parse threw a bare FormatException here, which CliApp's BarcodeGenerationException
+        // handler could not see: the user got a stack trace for a plain typo.
+        var ex = Assert.Throws<BarcodeGenerationException>(() =>
+            SpecArgs.Parse(["generate", "qr", "HELLO", option, "abc"]));
+
+        Assert.Equal("invalid_args", ex.Code);
+        Assert.Contains(option, ex.Message);
+        Assert.Contains("abc", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_UnknownOption_ThrowsInvalidArgs()
+    {
+        var ex = Assert.Throws<BarcodeGenerationException>(() =>
+            SpecArgs.Parse(["generate", "qr", "HELLO", "--nonsense-flag"]));
+
+        Assert.Equal("invalid_args", ex.Code);
+        Assert.Contains("--nonsense-flag", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_MisspelledOption_ThrowsInsteadOfSilentlyIgnoringIt()
+    {
+        // The trap this guards: --rotaton 90 used to leave Rotation at "auto" and exit 0, so a
+        // scanner test silently ran against a different symbol than the one that was asked for.
+        var ex = Assert.Throws<BarcodeGenerationException>(() =>
+            SpecArgs.Parse(["generate", "qr", "HELLO", "--rotaton", "90"]));
+
+        Assert.Equal("invalid_args", ex.Code);
+        Assert.Contains("--rotaton", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_ViewerOptions_AreAcceptedEvenThoughSpecArgsDoesNotConsumeThem()
+    {
+        // ViewerClient reads these off the same argv later; neither the names nor their values are
+        // "unknown" just because they do not land in the BarcodeSpec.
+        var parsed = SpecArgs.Parse([
+            "generate", "qr", "HELLO",
+            "--open", "viewer",
+            "--viewer-port", "47999",
+            "--viewer-exe", "C:\\viewer\\EspBarcode.Viewer.Gui.exe",
+        ]);
+
+        Assert.Equal(OpenMode.Viewer, parsed.Open);
+        Assert.Equal("HELLO", parsed.Spec.Data);
+    }
+
+    [Fact]
+    public void Parse_OptionWithoutValue_ThrowsInvalidArgs()
+    {
+        var ex = Assert.Throws<BarcodeGenerationException>(() =>
+            SpecArgs.Parse(["generate", "qr", "HELLO", "--rotation"]));
+
+        Assert.Equal("invalid_args", ex.Code);
+        Assert.Contains("--rotation", ex.Message);
+    }
+
+    [Fact]
+    public void Parse_NegativeQuiet_IsStillAcceptedAsTheSymbologyDefaultSentinel()
+    {
+        var parsed = SpecArgs.Parse(["generate", "qr", "HELLO", "--quiet", "-1"]);
+        Assert.Equal(-1, parsed.Spec.Quiet);
+    }
 }
