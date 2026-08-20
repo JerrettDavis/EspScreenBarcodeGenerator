@@ -1,6 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace EspBarcode.Generator;
 
 /// <summary>Symbologies the standalone generator supports. Wire values match docs/PROTOCOL.md's generate.type field for the 13 shared with the ESP, plus pdf417 (host-only, matching the existing "license" scenario).</summary>
+/// <remarks>The converter makes JSON use those same wire values, so the viewer's <c>POST /render</c>
+/// body speaks the documented vocabulary rather than enum ordinals — see <see cref="BarcodeTypeJsonConverter"/>.</remarks>
+[JsonConverter(typeof(BarcodeTypeJsonConverter))]
 public enum BarcodeType
 {
     Qr,
