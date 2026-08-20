@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose a new symbology, protocol command, or tooling capability.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do that isn't currently possible?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Firmware behavior, new protocol command/field, or tooling change you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing workarounds, e.g. the raw-matrix upload path for symbologies the device doesn't generate on-board.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This would require a firmware change
+        - label: This would require a protocol version bump (docs/PROTOCOL.md)
+        - label: This would require a host-tool (Python) change
+        - label: This would require a .NET client change

@@ -1,0 +1,125 @@
+{
+  "schema": "esp-screen-barcode-validation/1",
+  "independent_decoder": "MuPDF via PyMuPDF 1.26.7",
+  "cases": [
+    {
+      "case": "Code 128",
+      "encoder_type": "code128",
+      "decoder_type": "code128",
+      "decoded": "Hello-123",
+      "width_modules": 134,
+      "height_modules": 48,
+      "result": "pass"
+    },
+    {
+      "case": "GS1-128 FNC1",
+      "encoder_type": "gs1-128",
+      "decoder_type": "code128",
+      "decoded": "0109501101530003<GS>10ABC",
+      "width_modules": 200,
+      "height_modules": 48,
+      "result": "pass"
+    },
+    {
+      "case": "Code 39",
+      "encoder_type": "code39",
+      "decoder_type": "code39",
+      "decoded": "LAB-39",
+      "width_modules": 127,
+      "height_modules": 48,
+      "result": "pass"
+    },
+    {
+      "case": "EAN-13",
+      "encoder_type": "ean13",
+      "decoder_type": "ean13",
+      "decoded": "5901234123457",
+      "width_modules": 95,
+      "height_modules": 48,
+      "result": "pass"
+    },
+    {
+      "case": "EAN-8",
+      "encoder_type": "ean8",
+      "decoder_type": "ean8",
+      "decoded": "55123457",
+      "width_modules": 67,
+      "height_modules": 48,
+      "result": "pass"
+    },
+    {
+      "case": "UPC-A",
+      "encoder_type": "upca",
+      "decoder_type": "upca",
+      "decoded": "036000291452",
+      "width_modules": 95,
+      "height_modules": 48,
+      "result": "pass"
+    },
+    {
+      "case": "ITF",
+      "encoder_type": "itf",
+      "decoder_type": "itf",
+      "decoded": "12345670",
+      "width_modules": 81,
+      "height_modules": 48,
+      "result": "pass"
+    },
+    {
+      "case": "ITF-14",
+      "encoder_type": "itf14",
+      "decoder_type": "itf",
+      "decoded": "10012345000017",
+      "width_modules": 135,
+      "height_modules": 48,
+      "result": "pass"
+    },
+    {
+      "case": "Codabar",
+      "encoder_type": "codabar",
+      "decoder_type": "codabar",
+      "decoded": "A12345B",
+      "width_modules": 87,
+      "height_modules": 48,
+      "result": "pass"
+    },
+    {
+      "case": "Data Matrix ECC200",
+      "encoder_type": "datamatrix",
+      "decoder_type": "datamatrix",
+      "decoded": "DM-ROUNDTRIP-123",
+      "width_modules": 18,
+      "height_modules": 18,
+      "result": "pass"
+    },
+    {
+      "case": "Rectangular Data Matrix",
+      "encoder_type": "datamatrix",
+      "decoder_type": "datamatrix",
+      "decoded": "RECT-123",
+      "width_modules": 32,
+      "height_modules": 8,
+      "result": "pass"
+    },
+    {
+      "case": "Aztec",
+      "encoder_type": "aztec",
+      "decoder_type": "aztec",
+      "decoded": "AZTEC-ROUNDTRIP-123",
+      "width_modules": 21,
+      "height_modules": 21,
+      "result": "pass"
+    },
+    {
+      "case": "Aztec Rune",
+      "encoder_type": "aztec",
+      "decoder_type": "aztec",
+      "decoded": "042",
+      "width_modules": 13,
+      "height_modules": 13,
+      "result": "pass"
+    }
+  ],
+  "passed": 13,
+  "failed": 0
+}

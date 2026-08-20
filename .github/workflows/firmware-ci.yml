@@ -1,0 +1,90 @@
+name: Firmware CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  PLATFORMIO_VERSION: "6.1.19"
+
+jobs:
+  native-validation:
+    name: Native tests & validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: python -m pip install "platformio==${{ env.PLATFORMIO_VERSION }}"
+
+      - name: Install CMake, Ninja, and validation dependencies
+        run: |
+          python -m pip install cmake ninja
+          python -m pip install -r tools/requirements.txt
+          python -m pip install -r tools/validation-requirements.txt
+
+      - name: PlatformIO native Unity tests
+        run: python -m platformio test -e native
+
+      - name: Configure native CMake validation build
+        run: cmake -S . -B .build/native-validation -G Ninja -DCMAKE_BUILD_TYPE=Debug -DESPBARCODE_ENABLE_SANITIZERS=ON
+
+      - name: Build native CMake targets
+        run: cmake --build .build/native-validation --parallel
+
+      - name: Run native core tests (ctest)
+        run: ctest --test-dir .build/native-validation --output-on-failure
+
+      - name: Python host-tool tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Static firmware hardware-contract checks
+        run: python tests/static_firmware_checks.py
+
+      - name: Independent decoder validation
+        run: |
+          python tests/validate_symbols.py \
+            --cli .build/native-validation/barcode_native \
+            --report docs/validation/independent-decoder-report.json
+
+  esp32-build:
+    name: ESP32 firmware build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: python -m pip install "platformio==${{ env.PLATFORMIO_VERSION }}"
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-esp32dev-${{ hashFiles('platformio.ini') }}
+
+      - name: Build esp32dev firmware
+        run: python -m platformio run -e esp32dev
+
+  workflow-lint:
+    name: Lint GitHub workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rhysd/actionlint@v1.7.12

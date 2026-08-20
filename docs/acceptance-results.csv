@@ -1,0 +1,1 @@
+timestamp,firmware_version,firmware_sha256,display_revision,scanner_model,scanner_engine,scanner_firmware,scanner_profile,symbology,payload,expected,observed,polarity,rotation,quiet_modules,module_pixels,distance_cm,horizontal_angle_deg,vertical_angle_deg,ambient_light,attempts,successes,incorrect_decodes,result,notes

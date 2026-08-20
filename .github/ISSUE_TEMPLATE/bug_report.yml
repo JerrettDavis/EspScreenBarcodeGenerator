@@ -1,0 +1,61 @@
+name: Bug report
+description: Something in the firmware, host tooling, or .NET client isn't working as documented.
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Firmware (ESP32)
+        - USB protocol / docs
+        - Python host tool (tools/espbarcode.py)
+        - .NET client / CLI (dotnet/)
+        - Build / CI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including any error output or JSON protocol traffic.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. `pio run -e esp32dev -t upload --upload-port COM7`
+        2. `python tools/espbarcode.py --port COM7 generate qr "TEST"`
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: firmware-version
+    attributes:
+      label: Firmware version
+      placeholder: e.g. 0.1.0 (from the `hello` command's `firmware` field)
+
+  - type: input
+    id: environment
+    attributes:
+      label: Host environment
+      placeholder: OS, PlatformIO version, .NET SDK version, Python version, etc.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / serial output
+      render: text

@@ -1,0 +1,14 @@
+.pio/
+.vscode/
+.build/
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+Thumbs.db
+
+# .NET
+dotnet/**/bin/
+dotnet/**/obj/
+*.user
+.vs/

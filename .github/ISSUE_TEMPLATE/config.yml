@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Protocol reference
+    url: https://github.com/JerrettDavis/EspScreenBarcodeGenerator/blob/main/docs/PROTOCOL.md
+    about: Read the full USB serial protocol spec before filing a protocol question.

@@ -1,0 +1,8 @@
+{"id":1,"cmd":"hello"}
+{"id":2,"cmd":"capabilities"}
+{"id":3,"cmd":"generate","type":"qr","data":"LAB-TEST-001","ecc":"M","display":true}
+{"id":4,"cmd":"generate","type":"datamatrix","data":"DM-ROUNDTRIP-123","rect":false,"display":true}
+{"id":5,"cmd":"generate","type":"gs1-128","data":"0109501101530003{FNC1}10ABC","display":true}
+{"id":6,"cmd":"save","name":"GS1_SAMPLE"}
+{"id":7,"cmd":"list"}
+{"id":8,"cmd":"close"}

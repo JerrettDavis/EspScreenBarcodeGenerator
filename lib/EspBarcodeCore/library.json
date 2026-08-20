@@ -1,0 +1,12 @@
+{
+  "name": "EspBarcodeCore",
+  "version": "0.1.0",
+  "description": "Portable barcode encoding and pixel-exact layout core",
+  "keywords": ["barcode", "datamatrix", "aztec", "code128", "ean"],
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": {
+    "ricmoo/QRCode": "^0.0.1"
+  }
+}

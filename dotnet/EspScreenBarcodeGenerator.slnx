@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Build.props" />
+    <File Path="global.json" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/EspBarcode.Cli/EspBarcode.Cli.csproj" />
+    <Project Path="src/EspBarcode.Client/EspBarcode.Client.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EspBarcode.Client.Tests/EspBarcode.Client.Tests.csproj" />
+  </Folder>
+</Solution>

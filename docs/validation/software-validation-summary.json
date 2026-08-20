@@ -1,0 +1,48 @@
+{
+  "schema": "esp-screen-barcode-software-validation/1",
+  "project_version": "0.1.0",
+  "validation_date": "2026-08-20",
+  "delivery_environment": {
+    "portable_cpp17_warnings_as_errors": "pass",
+    "native_core_tests": {
+      "result": "pass",
+      "count": 6
+    },
+    "address_sanitizer": "pass",
+    "undefined_behavior_sanitizer": "pass",
+    "python_host_tests": {
+      "result": "pass",
+      "count": 17
+    },
+    "static_hardware_protocol_contract": "pass",
+    "independent_decoder_round_trips": {
+      "result": "pass",
+      "count": 13,
+      "decoder": "MuPDF via PyMuPDF 1.26.7"
+    },
+    "platformio_esp32_cross_build": {
+      "result": "pass"
+    },
+    "physical_hosyond_flash": {
+      "result": "pass",
+      "notes": "Flashed to a real ESP32-D0WD-V3 Hosyond unit on COM7 and exercised the full USB protocol surface (hello, capabilities, status, generate for QR/Data Matrix/Code 128/GS1-128, preset save/list/load/delete, backlight, close/home, raw matrix upload/download with CRC32, reboot)."
+    },
+    "physical_zebra_scan_qualification": "not_run",
+    "dotnet_client_tests": {
+      "result": "pass",
+      "count": 21,
+      "runtime": ".NET 10 / C# 14, xUnit"
+    },
+    "compiler_matrix": {
+      "gcc_14_2_0": "pass",
+      "clang_17_0_0": "pass"
+    }
+  },
+  "reproducible_ci": {
+    "platformio_core": "6.1.19",
+    "espressif32_platform": "7.0.1",
+    "native_qr_dependency_test": true,
+    "esp32_cross_build": true,
+    "asan_ubsan_native_build": true
+  }
+}
