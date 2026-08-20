@@ -8,6 +8,7 @@
     <Project Path="src/EspBarcode.Client/EspBarcode.Client.csproj" />
     <Project Path="src/EspBarcode.Generator/EspBarcode.Generator.csproj" />
     <Project Path="src/EspBarcode.Viewer.Cli/EspBarcode.Viewer.Cli.csproj" />
+    <Project Path="src/EspBarcode.Viewer.Gui/EspBarcode.Viewer.Gui.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/EspBarcode.Client.Tests/EspBarcode.Client.Tests.csproj" />

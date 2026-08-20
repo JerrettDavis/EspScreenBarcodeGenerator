@@ -1,0 +1,17 @@
+<Window x:Class="EspBarcode.Viewer.Gui.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="EspBarcode Viewer" Width="480" Height="640"
+        Background="White" UseLayoutRounding="True">
+    <Grid x:Name="RootGrid" Background="White">
+        <!-- Stretch=Fill against the explicit Width/Height the code-behind computes from the DPI
+             scale, so one barcode module always lands on a whole number of device pixels.
+             NearestNeighbor keeps module edges hard if rounding ever leaves a fractional scale. -->
+        <Image x:Name="BarcodeImage" Stretch="Fill"
+               RenderOptions.BitmapScalingMode="NearestNeighbor"
+               HorizontalAlignment="Center" VerticalAlignment="Center" />
+        <TextBlock x:Name="StatusText" Visibility="Collapsed" Foreground="#B00020" Margin="16"
+                   TextWrapping="Wrap" TextAlignment="Center"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Grid>
+</Window>

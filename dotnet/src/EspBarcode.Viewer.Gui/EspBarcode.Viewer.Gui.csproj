@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>EspBarcode.Viewer.Gui</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EspBarcode.Generator\EspBarcode.Generator.csproj" />
+  </ItemGroup>
+
+  <!-- ASP.NET Core (Kestrel + minimal APIs) in a non-Web-SDK project is consumed via the shared
+       framework reference alone; there is no Microsoft.AspNetCore.App.Ref package to add. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>
