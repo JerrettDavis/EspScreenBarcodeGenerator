@@ -7,9 +7,11 @@
     <Project Path="src/EspBarcode.Cli/EspBarcode.Cli.csproj" />
     <Project Path="src/EspBarcode.Client/EspBarcode.Client.csproj" />
     <Project Path="src/EspBarcode.Generator/EspBarcode.Generator.csproj" />
+    <Project Path="src/EspBarcode.Viewer.Cli/EspBarcode.Viewer.Cli.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/EspBarcode.Client.Tests/EspBarcode.Client.Tests.csproj" />
     <Project Path="tests/EspBarcode.Generator.Tests/EspBarcode.Generator.Tests.csproj" />
+    <Project Path="tests/EspBarcode.Viewer.Cli.Tests/EspBarcode.Viewer.Cli.Tests.csproj" />
   </Folder>
 </Solution>
