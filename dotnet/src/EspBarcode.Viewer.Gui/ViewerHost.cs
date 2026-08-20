@@ -41,9 +41,11 @@ internal static class ViewerHost
             }
             catch (Exception ex)
             {
-                // BarcodeGenerator.Encode lets some ZXing failures through unwrapped (a Code 39
-                // payload with a non-encodable character throws ArgumentException). Report them
-                // instead of letting them take the viewer process down mid-session.
+                // Defense in depth, not the primary guard: BarcodeGenerator.Encode now translates
+                // every ZXing failure it can raise into a BarcodeGenerationException at the source,
+                // so the catch above is what a bad payload actually lands in. This one keeps an
+                // unforeseen failure anywhere else in the render path (image encoding, WPF interop)
+                // from taking the viewer process down mid-session.
                 return Results.Json(new { Code = "render_failed", ex.Message }, statusCode: 500);
             }
         });

@@ -81,6 +81,61 @@ see the design spec at
 `docs/superpowers/specs/2026-08-20-dotnet-standalone-viewer-design.md`
 for why.
 
+`--rotation` accepts `auto` (default) plus all four explicit orientations
+`0`/`90`/`180`/`270`, each producing a genuinely distinct placement using
+the firmware's own per-module formulas (`src/BarcodeApplication.cpp`,
+`renderCurrent`). `auto` weighs `0` against `90` and takes whichever
+yields the larger module size, matching the firmware's `calculateLayout`.
+
+`--min-module` is clamped to a minimum of 1 pixel per module, again
+matching the firmware; a symbol that cannot reach that minimum on the
+target canvas fails with `too_dense` rather than rendering blank.
+
+### Viewer HTTP API
+
+The GUI hosts a loopback-only HTTP server on `127.0.0.1:<port>` (default
+`47823`, overridable with `--port` / `ESP_BARCODE_VIEWER_PORT`). The CLI
+drives it, but so can any test orchestrator:
+
+| Method | Path      | Body                | Response |
+| ------ | --------- | ------------------- | -------- |
+| GET    | `/health` | —                   | `200` when the viewer is up |
+| POST   | `/render` | `BarcodeSpec` JSON  | `200`, or `400` `{"code","message"}` on an invalid spec, or `500` `{"code","message"}` on an unexpected render failure |
+| POST   | `/close`  | —                   | `200`, then the viewer exits |
+
+`/render`'s body is the `BarcodeSpec` record in camelCase, mirroring the
+`generate` command's fields one-for-one (see
+[`docs/PROTOCOL.md`](../docs/PROTOCOL.md)). `type` is the **same
+wire-value string used everywhere else in this project** — `qr`,
+`datamatrix`, `aztec`, `code128`, `gs1-128`, `code39`, `upca`, `ean13`,
+`ean8`, `itf`, `itf14`, `codabar`, `msi`, `pdf417` — not an enum ordinal:
+
+```json
+{
+  "type": "qr",
+  "data": "LAB-TEST-001",
+  "ecc": "M",
+  "rotation": "auto",
+  "quiet": -1,
+  "minModule": 2,
+  "rectangular": false,
+  "invert": false,
+  "checksum": true,
+  "qrMinVersion": 1,
+  "qrMaxVersion": 20,
+  "aztecSecurity": 23,
+  "aztecLayers": 1
+}
+```
+
+Only `type` and `data` are required; every other field defaults exactly as
+the `generate` command's corresponding option does.
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:47823/render `
+  -ContentType application/json -Body '{"type":"qr","data":"TEST"}'
+```
+
 ### Dev-mode note: locating the viewer executable
 
 `--open viewer` looks for `EspBarcode.Viewer.Gui.exe` next to

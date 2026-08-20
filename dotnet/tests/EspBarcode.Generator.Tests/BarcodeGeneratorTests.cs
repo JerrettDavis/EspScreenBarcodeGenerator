@@ -42,10 +42,14 @@ public class BarcodeGeneratorTests
     [Fact]
     public void Encode_PayloadRejectedByChecksums_KeepsItsOwnMoreSpecificCode()
     {
-        // The wrapping catch must not swallow the codes the generator already reports itself.
+        // The wrapping catch must not swallow the codes the generator already reports itself. Both
+        // halves deliberately use a code the generic wrapper cannot produce: it only ever reports
+        // "invalid_payload", so asserting that code here would pass whether or not the specific
+        // exception survived. A UPC-A body with the wrong final digit reaches Checksums, which
+        // reports "invalid_checksum".
         var ex = Assert.Throws<BarcodeGenerationException>(() =>
-            BarcodeGenerator.Encode(new BarcodeSpec { Type = BarcodeType.Ean13, Data = "ABCDEFGHIJKLM" }));
-        Assert.Equal("invalid_payload", ex.Code);
+            BarcodeGenerator.Encode(new BarcodeSpec { Type = BarcodeType.UpcA, Data = "036000291459" }));
+        Assert.Equal("invalid_checksum", ex.Code);
 
         var qr = Assert.Throws<BarcodeGenerationException>(() =>
             BarcodeGenerator.Encode(new BarcodeSpec { Type = BarcodeType.Qr, Data = new string('X', 5000), QrMaxVersion = 5 }));

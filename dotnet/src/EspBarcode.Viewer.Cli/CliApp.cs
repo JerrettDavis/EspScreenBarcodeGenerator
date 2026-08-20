@@ -99,19 +99,28 @@ internal static class CliApp
             Usage:
               espbarcode-viewer generate <type> <data|@file> [options]
               espbarcode-viewer close [--viewer-port N]
+              espbarcode-viewer list-types
 
             Options:
-              --out PATH               Write a PNG to PATH
-              --open none|system|viewer  Open mode (default: none)
+              --out PATH                Write a PNG to PATH
+              --open none|system|viewer Open mode (default: none)
               --ecc L|M|Q|H             QR error correction (default: M)
               --rotation auto|0|90|180|270
+                                        auto picks the better of 0/90 for the canvas;
+                                        all four explicit values are distinct orientations
               --quiet N                 Quiet zone in modules, -1 = symbology default
-              --min-module N            Minimum pixels per module (default: 2)
+              --min-module N            Minimum pixels per module (default: 2, minimum 1)
               --rect                    Request rectangular Data Matrix
               --invert                  White modules on black background
               --no-checksum             Disable MSI/retail check-digit computation
               --qr-min-version N / --qr-max-version N
               --aztec-security N / --aztec-layers N
+
+            Viewer options (--open viewer, and close):
+              --viewer-port N           Loopback port the viewer listens on (default: 47823,
+                                        or ESP_BARCODE_VIEWER_PORT in the viewer itself)
+              --viewer-exe PATH         EspBarcode.Viewer.Gui executable to launch
+                                        (default: next to this exe, or ESP_BARCODE_VIEWER_EXE_PATH)
             """);
     }
 }

@@ -41,10 +41,11 @@ public partial class MainWindow : Window
             {
                 // Captured rather than thrown out of the dispatcher callback: an exception escaping
                 // a DispatcherOperation is routed through Application.DispatcherUnhandledException
-                // first, which would tear this long-lived viewer down over one bad request. Note
-                // that BarcodeGenerator.Encode does not wrap every ZXing failure in a
-                // BarcodeGenerationException (e.g. Code 39 with a non-encodable character surfaces
-                // as a raw ArgumentException), so this deliberately catches Exception.
+                // first, which would tear this long-lived viewer down over one bad request.
+                // BarcodeGenerator.Encode wraps every ZXing failure in a BarcodeGenerationException
+                // at the source, so a bad payload arrives already typed; catching Exception here is
+                // defense in depth for the rest of the path (rendering, bitmap decoding), whose
+                // failures must be reportable rather than fatal.
                 _currentSpec = previous;
                 failure = ex;
                 return;

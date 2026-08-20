@@ -41,7 +41,6 @@ public class BarcodeImageRendererTests
         using var stream = new MemoryStream(png);
         using var bitmap = new Bitmap(stream);
         var center = bitmap.GetPixel(5, 5);
-        var corner = bitmap.GetPixel(0, 0); // outside the 1x1 module at scale 10 in a 10x10 canvas -> actually covers whole canvas; assert black
         Assert.Equal(Color.FromArgb(255, 0, 0, 0).ToArgb(), center.ToArgb());
     }
 
