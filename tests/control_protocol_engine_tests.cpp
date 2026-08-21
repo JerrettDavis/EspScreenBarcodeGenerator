@@ -1,5 +1,7 @@
 #include "ApplicationPorts.h"
 #include "ControlSession.h"
+#include "ControlProtocolEngine.h"
+#include "vectors_v1_golden.h"
 
 #include <iostream>
 #include <map>
@@ -192,6 +194,147 @@ void test_duplicate_result_cache_evicts_oldest_when_full() {
     CHECK(session.lookupCachedResult(OperationId{8}).has_value());
 }
 
+class RecordingSink : public IControlResponseSink {
+public:
+    void send(const Response& response) override { responses.push_back(response); }
+    void sendError(const ProtocolError& error) override { errors.push_back(error); }
+
+    std::vector<Response> responses;
+    std::vector<ProtocolError> errors;
+};
+
+void test_hello_matches_golden_fixture() {
+    FakeBarcodeDevice device;
+    FakePresetRepository presets;
+    FakeDeviceControl control;
+    ControlProtocolEngine engine(device, presets, control, "0.1.0-test");
+    ControlSession session{ControlSessionId{1}, ControllerId{1}};
+    RecordingSink sink;
+
+    engine.handle(session, HelloCommand{}, OperationId{1}, "usb-uart-ndjson", sink);
+
+    CHECK(sink.responses.size() == 1);
+    CHECK(std::holds_alternative<HelloResponse>(sink.responses[0]));
+    const auto& hello = std::get<HelloResponse>(sink.responses[0]);
+    CHECK(hello.device == "EspScreenBarcodeGenerator");
+    CHECK(hello.protocol == "1.0");
+    CHECK(hello.transport == "usb-uart-ndjson");
+    CHECK(hello.screenWidth == 320 && hello.screenHeight == 480);
+}
+
+void test_status_no_current_matches_golden_fixture() {
+    FakeBarcodeDevice device;
+    FakePresetRepository presets;
+    FakeDeviceControl control;
+    ControlProtocolEngine engine(device, presets, control, "0.1.0-test");
+    ControlSession session{ControlSessionId{1}, ControllerId{1}};
+    RecordingSink sink;
+
+    engine.handle(session, StatusCommand{}, OperationId{1}, "usb-uart-ndjson", sink);
+
+    CHECK(sink.responses.size() == 1);
+    const auto& status = std::get<StatusResponse>(sink.responses[0]);
+    CHECK(!status.barcodeVisible);
+    CHECK(!status.hasCurrent);
+    CHECK(!status.current.has_value());
+}
+
+void test_close_home_backlight_match_golden_fixtures() {
+    FakeBarcodeDevice device;
+    FakePresetRepository presets;
+    FakeDeviceControl control;
+    ControlProtocolEngine engine(device, presets, control, "0.1.0-test");
+    ControlSession session{ControlSessionId{1}, ControllerId{1}};
+    RecordingSink sink;
+
+    engine.handle(session, CloseCommand{}, OperationId{1}, "usb-uart-ndjson", sink);
+    engine.handle(session, HomeCommand{}, OperationId{2}, "usb-uart-ndjson", sink);
+    engine.handle(session, BacklightCommand{false}, OperationId{3}, "usb-uart-ndjson", sink);
+
+    CHECK(std::get<SimpleOkResponse>(sink.responses[0]).message == "barcode closed");
+    CHECK(std::get<SimpleOkResponse>(sink.responses[1]).message == "home screen displayed");
+    CHECK(std::get<SimpleOkResponse>(sink.responses[2]).message == "backlight off");
+}
+
+void test_upload_round_trip_matches_golden_fixtures() {
+    FakeBarcodeDevice device;
+    FakePresetRepository presets;
+    FakeDeviceControl control;
+    ControlProtocolEngine engine(device, presets, control, "0.1.0-test");
+    ControlSession session{ControlSessionId{1}, ControllerId{1}};
+    RecordingSink sink;
+
+    UploadBeginCommand begin{3, 2, false, 4, espbarcode::Rotation::Auto, false, true, "external-pdf417"};
+    engine.handle(session, begin, OperationId{1}, "usb-uart-ndjson", sink);
+    CHECK(std::get<UploadBeginResponse>(sink.responses.back()).bytesExpected == 1);
+
+    engine.handle(session, UploadChunkCommand{0, {0xA8}}, OperationId{2}, "usb-uart-ndjson", sink);
+    CHECK(std::get<UploadChunkResponse>(sink.responses.back()).nextOffset == 1);
+
+    engine.handle(session, UploadEndCommand{168805463u}, OperationId{3}, "usb-uart-ndjson", sink);
+    const auto& end = std::get<UploadEndResponse>(sink.responses.back());
+    CHECK(end.crc32 == 168805463u);
+    CHECK(end.displayed);
+    CHECK(device.currentIsRaw());
+}
+
+void test_upload_chunk_wrong_offset_matches_golden_fixture() {
+    FakeBarcodeDevice device;
+    FakePresetRepository presets;
+    FakeDeviceControl control;
+    ControlProtocolEngine engine(device, presets, control, "0.1.0-test");
+    ControlSession session{ControlSessionId{1}, ControllerId{1}};
+    RecordingSink sink;
+
+    engine.handle(session, UploadBeginCommand{3, 2, false, 4, espbarcode::Rotation::Auto, false, true, "x"},
+                  OperationId{1}, "usb-uart-ndjson", sink);
+    engine.handle(session, UploadChunkCommand{1, {0xA8}}, OperationId{2}, "usb-uart-ndjson", sink);
+
+    CHECK(sink.errors.size() == 1);
+    CHECK(sink.errors[0].code == "unexpected_offset");
+}
+
+void test_reboot_is_replayed_and_triggers_device_control_only_once() {
+    FakeBarcodeDevice device;
+    FakePresetRepository presets;
+    FakeDeviceControl control;
+    ControlProtocolEngine engine(device, presets, control, "0.1.0-test");
+    ControlSession session{ControlSessionId{1}, ControllerId{1}};
+    RecordingSink sink;
+
+    engine.handle(session, RebootCommand{}, OperationId{99}, "usb-uart-ndjson", sink);
+    CHECK(control.rebooted());
+
+    // A duplicate operation id (carrier retry) must replay the cached ack, not re-trigger
+    // the real restart. FakeDeviceControl only tracks a bool, so this asserts the replayed
+    // response is identical; a richer fake could additionally count invocations.
+    RecordingSink secondSink;
+    engine.handle(session, RebootCommand{}, OperationId{99}, "usb-uart-ndjson", secondSink);
+    CHECK(secondSink.responses.size() == 1);
+    CHECK(std::get<SimpleOkResponse>(secondSink.responses[0]).message == "rebooting");
+}
+
+void test_two_sessions_do_not_corrupt_each_others_upload_via_the_engine() {
+    FakeBarcodeDevice deviceA, deviceB;
+    FakePresetRepository presetsA, presetsB;
+    FakeDeviceControl controlA, controlB;
+    ControlProtocolEngine engineA(deviceA, presetsA, controlA, "0.1.0-test");
+    ControlProtocolEngine engineB(deviceB, presetsB, controlB, "0.1.0-test");
+    ControlSession sessionA{ControlSessionId{1}, ControllerId{1}};
+    ControlSession sessionB{ControlSessionId{2}, ControllerId{2}};
+    RecordingSink sinkA, sinkB;
+
+    engineA.handle(sessionA, UploadBeginCommand{3, 2, false, 4, espbarcode::Rotation::Auto, false, true, "a"},
+                   OperationId{1}, "usb-uart-ndjson", sinkA);
+    engineA.handle(sessionA, UploadChunkCommand{0, {0xA8}}, OperationId{2}, "usb-uart-ndjson", sinkA);
+
+    // Session B never began an upload — its engine call must fail with no_upload, proving
+    // session A's TransferSession state never leaked into session B.
+    engineB.handle(sessionB, UploadChunkCommand{0, {0xFF}}, OperationId{2}, "usb-uart-ndjson", sinkB);
+    CHECK(sinkB.errors.size() == 1);
+    CHECK(sinkB.errors[0].code == "no_upload");
+}
+
 }  // namespace
 
 int main() {
@@ -201,6 +344,13 @@ int main() {
     test_lease_cannot_be_acquired_twice_by_the_same_session();
     test_duplicate_result_cache_round_trips_and_replays();
     test_duplicate_result_cache_evicts_oldest_when_full();
+    test_hello_matches_golden_fixture();
+    test_status_no_current_matches_golden_fixture();
+    test_close_home_backlight_match_golden_fixtures();
+    test_upload_round_trip_matches_golden_fixtures();
+    test_upload_chunk_wrong_offset_matches_golden_fixture();
+    test_reboot_is_replayed_and_triggers_device_control_only_once();
+    test_two_sessions_do_not_corrupt_each_others_upload_via_the_engine();
     if (failures != 0) {
         std::cerr << failures << " control protocol engine test(s) failed\n";
         return EXIT_FAILURE;

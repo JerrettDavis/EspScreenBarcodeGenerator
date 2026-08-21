@@ -42,6 +42,7 @@ set(ESPLINKCORE_SOURCES
     lib/EspLinkCore/src/Cobs.cpp
     lib/EspLinkCore/src/FrameAssembler.cpp
     lib/EspLinkCore/src/ControlSession.cpp
+    lib/EspLinkCore/src/ControlProtocolEngine.cpp
 )
 add_library(EspLinkCore STATIC ${ESPLINKCORE_SOURCES})
 target_include_directories(EspLinkCore PUBLIC lib/EspLinkCore/src)
