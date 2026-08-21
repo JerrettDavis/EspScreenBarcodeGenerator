@@ -35,9 +35,17 @@ endfunction()
 
 espbarcode_enable_sanitizers(EspBarcodeCore)
 
+add_library(EspLinkCore INTERFACE)
+target_include_directories(EspLinkCore INTERFACE lib/EspLinkCore/src)
+target_link_libraries(EspLinkCore INTERFACE EspBarcodeCore)
+
 add_executable(native_core_tests tests/native_core_tests.cpp)
 target_link_libraries(native_core_tests PRIVATE EspBarcodeCore)
 espbarcode_enable_sanitizers(native_core_tests)
+
+add_executable(esplink_types_tests tests/esplink_types_tests.cpp)
+target_link_libraries(esplink_types_tests PRIVATE EspLinkCore)
+espbarcode_enable_sanitizers(esplink_types_tests)
 
 add_executable(barcode_native tools/native_cli.cpp)
 target_link_libraries(barcode_native PRIVATE EspBarcodeCore)
@@ -46,4 +54,5 @@ espbarcode_enable_sanitizers(barcode_native)
 include(CTest)
 if(BUILD_TESTING)
     add_test(NAME native_core_tests COMMAND native_core_tests)
+    add_test(NAME esplink_types_tests COMMAND esplink_types_tests)
 endif()
