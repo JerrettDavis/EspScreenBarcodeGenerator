@@ -20,8 +20,10 @@ constexpr const char* kCommandCharUuid = "6f6d7502-2e73-4a1a-9d3f-1c9b6f4e5a01";
 constexpr const char* kEventCharUuid = "6f6d7503-2e73-4a1a-9d3f-1c9b6f4e5a01";    // notify: device -> host
 }  // namespace
 
-BleGattEndpoint::BleGattEndpoint(ControlProtocolEngine& engine, ControlSession& session, const IBarcodeDevice& device)
-    : engine_(engine), session_(session), device_(device) {}
+BleGattEndpoint::BleGattEndpoint(ControlProtocolEngine& engine, ControlSession& session, const IBarcodeDevice& device,
+                                 WifiDirectTcpEndpoint* wifiDirectProvisioningTarget)
+    : engine_(engine), session_(session), device_(device),
+      wifiDirectProvisioningTarget_(wifiDirectProvisioningTarget) {}
 
 bool BleGattEndpoint::begin(const char* deviceName, std::string& error) {
     BLEDevice::init(deviceName);
@@ -134,10 +136,17 @@ void BleGattEndpoint::processMessage(const MessageEnvelope& envelope, const std:
     const char* name = wrapper["name"] | "";
     JsonObjectConst innerBody = wrapper["body"].as<JsonObjectConst>();
 
-    const char* v1Name = mapV2Name(name);
     currentRequestOperationId_ = envelope.operationId;
     currentRequestName_ = name;
 
+    // Device-provisioning command, not a domain/barcode operation: handled here directly
+    // rather than through ControlProtocolEngine (see header note on the constructor param).
+    if (currentRequestName_ == "device.wifiDirect.configure") {
+        handleWifiDirectConfigure(innerBody);
+        return;
+    }
+
+    const char* v1Name = mapV2Name(name);
     if (v1Name == nullptr) {
         sendError(ProtocolError{name, "unknown_command", "command not supported over EspLink v2 this release"});
         return;
@@ -161,6 +170,43 @@ const char* BleGattEndpoint::mapV2Name(const std::string& name) {
     if (name == "barcode.close") return "close";
     if (name == "device.backlight.set") return "backlight";
     return nullptr;
+}
+
+void BleGattEndpoint::handleWifiDirectConfigure(JsonObjectConst body) {
+    JsonDocument wrapper;
+    wrapper["schema"] = "esbg.control/2.0";
+    wrapper["name"] = "device.wifiDirect.configure";
+
+    if (wifiDirectProvisioningTarget_ == nullptr) {
+        wrapper["error"]["code"] = "unsupported";
+        wrapper["error"]["message"] = "Wi-Fi Direct is not compiled into this build";
+        std::string serialized;
+        serializeJson(wrapper, serialized);
+        sendEnvelope(MessageKind::Error, ServiceId::Device, std::vector<uint8_t>(serialized.begin(), serialized.end()),
+                    currentRequestOperationId_);
+        return;
+    }
+
+    const char* ssid = body["ssid"] | "";
+    const char* passphrase = body["passphrase"] | "";
+    const int port = body["port"] | 0;
+
+    std::string error;
+    const bool ok = (ssid[0] != '\0') && port > 0 && port <= 65535 &&
+                    wifiDirectProvisioningTarget_->configure(ssid, passphrase, static_cast<uint16_t>(port), error);
+
+    if (ok) {
+        JsonObject responseBody = wrapper["body"].to<JsonObject>();
+        responseBody["ok"] = true;
+    } else {
+        wrapper["error"]["code"] = "invalid_argument";
+        wrapper["error"]["message"] = ok ? "" : (error.empty() ? "ssid and a valid port are required" : error);
+    }
+
+    std::string serialized;
+    serializeJson(wrapper, serialized);
+    const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
+    sendEnvelope(ok ? MessageKind::Result : MessageKind::Error, ServiceId::Device, bodyBytes, currentRequestOperationId_);
 }
 
 void BleGattEndpoint::sendEnvelope(MessageKind kind, ServiceId serviceId, const std::vector<uint8_t>& bodyBytes,

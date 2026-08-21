@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>EspBarcode.Client.WifiDirect</PackageId>
+    <Description>Windows Wi-Fi Direct legacy group-owner connector for EspLink v2 (CarrierProfileId.TcpStandard) using WinRT Wi-Fi Direct.</Description>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EspBarcode.Connectivity\EspBarcode.Connectivity.csproj" />
+  </ItemGroup>
+
+</Project>

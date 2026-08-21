@@ -44,6 +44,7 @@ set(ESPLINKCORE_SOURCES
     lib/EspLinkCore/src/ControlSession.cpp
     lib/EspLinkCore/src/ControlProtocolEngine.cpp
     lib/EspLinkCore/src/Fragmenter.cpp
+    lib/EspLinkCore/src/LengthPrefixFraming.cpp
 )
 add_library(EspLinkCore STATIC ${ESPLINKCORE_SOURCES})
 target_include_directories(EspLinkCore PUBLIC lib/EspLinkCore/src)
@@ -83,6 +84,10 @@ add_executable(esplink_fragmenter_tests tests/esplink_fragmenter_tests.cpp)
 target_link_libraries(esplink_fragmenter_tests PRIVATE EspLinkCore)
 espbarcode_enable_sanitizers(esplink_fragmenter_tests)
 
+add_executable(esplink_length_prefix_framing_tests tests/esplink_length_prefix_framing_tests.cpp)
+target_link_libraries(esplink_length_prefix_framing_tests PRIVATE EspLinkCore)
+espbarcode_enable_sanitizers(esplink_length_prefix_framing_tests)
+
 add_executable(barcode_native tools/native_cli.cpp)
 target_link_libraries(barcode_native PRIVATE EspBarcodeCore)
 espbarcode_enable_sanitizers(barcode_native)
@@ -96,4 +101,5 @@ if(BUILD_TESTING)
     add_test(NAME esplink_codec_tests COMMAND esplink_codec_tests)
     add_test(NAME control_protocol_engine_tests COMMAND control_protocol_engine_tests)
     add_test(NAME esplink_fragmenter_tests COMMAND esplink_fragmenter_tests)
+    add_test(NAME esplink_length_prefix_framing_tests COMMAND esplink_length_prefix_framing_tests)
 endif()

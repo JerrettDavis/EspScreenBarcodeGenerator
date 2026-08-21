@@ -11,6 +11,7 @@
 #include "EspNowEndpoint.h"
 #include "SerialCobsEndpoint.h"
 #include "SerialLegacyEndpoint.h"
+#include "WifiDirectTcpEndpoint.h"
 #include "app_config.h"
 
 namespace {
@@ -24,10 +25,14 @@ esplink::ControlSession legacySession(esplink::ControlSessionId{1}, esplink::Con
 esplink::ControlSession v2Session(esplink::ControlSessionId{2}, esplink::ControllerId{1});
 esplink::ControlSession espNowSession(esplink::ControlSessionId{3}, esplink::ControllerId{1});
 esplink::ControlSession bleSession(esplink::ControlSessionId{4}, esplink::ControllerId{1});
+esplink::ControlSession wifiDirectSession(esplink::ControlSessionId{5}, esplink::ControllerId{1});
 esplink::SerialLegacyEndpoint legacyEndpoint(engine, legacySession, deviceControl, applicationAdapter);
 esplink::SerialCobsEndpoint cobsEndpoint(engine, v2Session, applicationAdapter);
 esplink::EspNowEndpoint espNowEndpoint(engine, espNowSession, applicationAdapter);
-esplink::BleGattEndpoint bleEndpoint(engine, bleSession, applicationAdapter);
+esplink::WifiDirectTcpEndpoint wifiDirectEndpoint(engine, wifiDirectSession, applicationAdapter);
+// BLE is this build's trusted bootstrap transport for Wi-Fi Direct credential provisioning
+// (docs/PROTOCOL_V2.md §12.6) — it forwards `device.wifiDirect.configure` to wifiDirectEndpoint.
+esplink::BleGattEndpoint bleEndpoint(engine, bleSession, applicationAdapter, &wifiDirectEndpoint);
 ActiveTransport active = ActiveTransport::Legacy;
 }  // namespace
 
@@ -59,6 +64,10 @@ void setup() {
     } else {
         Serial.printf("{\"event\":\"ble_error\",\"message\":\"%s\"}\n", bleError.c_str());
     }
+
+    // No-op until a controller provisions Wi-Fi Direct credentials over BLE (or a prior
+    // provisioning was persisted to NVS) — see WifiDirectTcpEndpoint::begin().
+    wifiDirectEndpoint.begin();
 }
 
 void loop() {
@@ -70,6 +79,7 @@ void loop() {
     }
     espNowEndpoint.loop();
     bleEndpoint.loop();
+    wifiDirectEndpoint.loop();
     application.loop();
     delay(1);
 }

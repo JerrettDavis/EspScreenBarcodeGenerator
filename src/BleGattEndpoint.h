@@ -16,6 +16,7 @@
 #include "Envelope.h"
 #include "FrameAssembler.h"
 #include "HopFrame.h"
+#include "WifiDirectTcpEndpoint.h"
 
 namespace esplink {
 
@@ -33,7 +34,14 @@ namespace esplink {
 // dispatch happens there. `loop()` drains that queue on the main task.
 class BleGattEndpoint : public IControlResponseSink, public BLEServerCallbacks, public BLECharacteristicCallbacks {
 public:
-    BleGattEndpoint(ControlProtocolEngine& engine, ControlSession& session, const IBarcodeDevice& device);
+    // `wifiDirectProvisioningTarget` is optional (nullable): when set, this endpoint also
+    // accepts the device-management-only `device.wifiDirect.configure` command (bypassing
+    // `ControlProtocolEngine` — it's provisioning, not a barcode/domain operation) and
+    // forwards it to `WifiDirectTcpEndpoint::configure` (docs/PROTOCOL_V2.md §12.6 "Trusted
+    // Bluetooth bootstrap"). Any trusted transport could host this bootstrap; BLE is the one
+    // wired up in this codebase.
+    BleGattEndpoint(ControlProtocolEngine& engine, ControlSession& session, const IBarcodeDevice& device,
+                    WifiDirectTcpEndpoint* wifiDirectProvisioningTarget = nullptr);
 
     // Initializes the BLE stack, creates the service/characteristics, and starts
     // advertising. Returns false and leaves `error` set on failure.
@@ -66,6 +74,7 @@ private:
     void processMessage(const MessageEnvelope& envelope, const std::vector<uint8_t>& body);
     void sendEnvelope(MessageKind kind, ServiceId serviceId, const std::vector<uint8_t>& bodyBytes,
                       uint64_t correlationId);
+    void handleWifiDirectConfigure(JsonObjectConst body);
 
     static const char* mapV2Name(const std::string& name);
 
@@ -73,6 +82,7 @@ private:
     ControlSession& session_;
     const IBarcodeDevice& device_;
     FrameAssembler assembler_;
+    WifiDirectTcpEndpoint* wifiDirectProvisioningTarget_;
 
     BLEServer* server_ = nullptr;
     BLECharacteristic* commandCharacteristic_ = nullptr;
