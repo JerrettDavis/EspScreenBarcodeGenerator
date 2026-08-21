@@ -314,6 +314,157 @@ void test_reboot_is_replayed_and_triggers_device_control_only_once() {
     CHECK(std::get<SimpleOkResponse>(secondSink.responses[0]).message == "rebooting");
 }
 
+struct EngineHarness {
+    FakeBarcodeDevice device;
+    FakePresetRepository presets;
+    FakeDeviceControl control;
+    ControlProtocolEngine engine;
+    ControlSession session;
+
+    EngineHarness() : engine(device, presets, control, "0.1.0-test"), session(ControlSessionId{1}, ControllerId{1}) {}
+};
+
+ControlSession::CommandResult dispatch(EngineHarness& harness, const Command& command, uint64_t operationId) {
+    RecordingSink sink;
+    harness.engine.handle(harness.session, command, OperationId{operationId}, "usb-uart-ndjson", sink);
+    CHECK(sink.responses.size() + sink.errors.size() == 1);
+    if (!sink.errors.empty()) return ControlSession::CommandResult{sink.errors.back()};
+    return ControlSession::CommandResult{sink.responses.back()};
+}
+
+const GoldenFixture& findGoldenFixture(const std::vector<GoldenFixture>& fixtures, const char* name) {
+    for (const auto& fixture : fixtures) {
+        if (std::string(fixture.name) == name) return fixture;
+    }
+    std::cerr << "FAIL: no golden fixture named " << name << '\n';
+    ++failures;
+    return fixtures.front();
+}
+
+// Compares two Response variants field-by-field. `expected`'s active alternative decides which
+// fields are meaningful; a couple of fields are deliberately not literal contract values (see the
+// per-fixture comments in vectors_v1_golden.h) and are skipped here to match.
+bool sameResponse(const Response& actual, const Response& expected, bool encoderDependent) {
+    if (actual.index() != expected.index()) return false;
+    return std::visit([&](const auto& exp) {
+        using T = std::decay_t<decltype(exp)>;
+        const T& act = std::get<T>(actual);
+        if constexpr (std::is_same_v<T, HelloResponse>) {
+            // firmware is injected at build time; the fixture stores a placeholder, not a literal.
+            return act.device == exp.device && act.protocol == exp.protocol && act.transport == exp.transport &&
+                   act.screenWidth == exp.screenWidth && act.screenHeight == exp.screenHeight;
+        } else if constexpr (std::is_same_v<T, StatusResponse>) {
+            // freeHeap is ignored by the replay test per the fixture's own precondition note.
+            return act.barcodeVisible == exp.barcodeVisible && act.hasCurrent == exp.hasCurrent &&
+                   act.currentRaw == exp.currentRaw && act.status == exp.status &&
+                   act.current.has_value() == exp.current.has_value();
+        } else if constexpr (std::is_same_v<T, GenerateResponse>) {
+            if (encoderDependent) {
+                return act.type == exp.type && act.displayed == exp.displayed && act.normalizedData == exp.normalizedData;
+            }
+            return act.type == exp.type && act.width == exp.width && act.height == exp.height &&
+                   act.linear == exp.linear && act.quiet == exp.quiet && act.displayed == exp.displayed &&
+                   act.normalizedData == exp.normalizedData;
+        } else if constexpr (std::is_same_v<T, SimpleOkResponse>) {
+            return act.command == exp.command && act.message == exp.message;
+        } else if constexpr (std::is_same_v<T, ListResponse>) {
+            return act.presets == exp.presets;
+        } else if constexpr (std::is_same_v<T, UploadBeginResponse>) {
+            return act.bytesExpected == exp.bytesExpected && act.nextOffset == exp.nextOffset;
+        } else if constexpr (std::is_same_v<T, UploadChunkResponse>) {
+            return act.accepted == exp.accepted && act.nextOffset == exp.nextOffset;
+        } else if constexpr (std::is_same_v<T, UploadEndResponse>) {
+            return act.crc32 == exp.crc32 && act.displayed == exp.displayed;
+        } else {
+            return false;  // no fixture uses CapabilitiesResponse/DownloadBegin/Chunk/EndEvent.
+        }
+    }, expected);
+}
+
+// `code`/`command` are always asserted literally; `message` is only asserted when the fixture
+// gives one (an empty fixture message means "not asserted literally" -- see e.g.
+// display_no_current_fails and load_unknown_name in vectors_v1_golden.h, whose real messages
+// come from a dynamic fake-device/preset error string rather than a fixed protocol contract).
+bool sameError(const ProtocolError& actual, const ProtocolError& expected) {
+    if (actual.command != expected.command || actual.code != expected.code) return false;
+    if (expected.message.empty()) return true;
+    return actual.message == expected.message;
+}
+
+void assertFixtureMatches(const GoldenFixture& fixture, const ControlSession::CommandResult& result) {
+    if (std::holds_alternative<ProtocolError>(fixture.expected)) {
+        CHECK(std::holds_alternative<ProtocolError>(result));
+        if (std::holds_alternative<ProtocolError>(result)) {
+            CHECK(sameError(std::get<ProtocolError>(result), std::get<ProtocolError>(fixture.expected)));
+        }
+    } else {
+        CHECK(std::holds_alternative<Response>(result));
+        if (std::holds_alternative<Response>(result)) {
+            CHECK(sameResponse(std::get<Response>(result), std::get<Response>(fixture.expected), fixture.encoderDependent));
+        }
+    }
+}
+
+// Replays every golden fixture's `command` through a real ControlProtocolEngine/ControlSession and
+// asserts the result against `fixture.expected`, with two documented exceptions:
+//
+//  - generate_invalid_symbology: its `command` field is a default-constructed GenerateCommand{}, not
+//    an actual invalid-symbology sentinel, because Command is already a typed, post-JSON-parse
+//    variant -- "unknown symbology" is a JSON-decode-time error that lives in JsonCommandCodec::decode
+//    (Task 8), which has no native test harness (Arduino/ArduinoJson-dependent). This fixture cannot
+//    be meaningfully replayed through the engine at all; it is verified at the JsonCommandCodec layer
+//    only, same pre-existing limitation noted throughout Tasks 8-9.
+//  - generate_qr_success: the native CMake validation build doesn't vendor ricmoo/QRCode (see
+//    native_core_tests.cpp), so Symbology::QrCode can't be encoded outside PlatformIO. Guarded with
+//    the same __has_include(<qrcode.h>) pattern native_core_tests.cpp uses; skipped entirely when
+//    that header isn't available. When it *is* available, only type/displayed/normalizedData are
+//    compared literally (width/height depend on the real encoder's exact module count, which isn't
+//    part of the protocol contract -- see the fixture's own precondition text).
+//
+// The upload-chain fixtures depend on prior session state (see each fixture's `precondition` text),
+// so they are not dispatched as independent single-shot calls: each gets a fresh engine+session that
+// first replays upload_begin_success_3x2's own command (and, where required, an un-listed
+// upload_chunk{offset:0,data:[0xA8]} step) before the fixture under test is dispatched and asserted.
+void test_all_golden_fixtures_replay_correctly() {
+    const auto& fixtures = goldenFixtures();
+
+    for (const auto& fixture : fixtures) {
+        const std::string name = fixture.name;
+
+        if (name == "generate_invalid_symbology") continue;
+
+        if (name == "generate_qr_success") {
+#if __has_include(<qrcode.h>)
+            EngineHarness harness;
+            auto result = dispatch(harness, fixture.command, 1);
+            assertFixtureMatches(fixture, result);
+#endif
+            continue;
+        }
+
+        if (name == "upload_chunk_wrong_offset" || name == "upload_chunk_overflow" || name == "upload_end_incomplete") {
+            EngineHarness harness;
+            dispatch(harness, findGoldenFixture(fixtures, "upload_begin_success_3x2").command, 1);
+            auto result = dispatch(harness, fixture.command, 2);
+            assertFixtureMatches(fixture, result);
+            continue;
+        }
+
+        if (name == "upload_end_crc_mismatch" || name == "upload_end_success_3x2") {
+            EngineHarness harness;
+            dispatch(harness, findGoldenFixture(fixtures, "upload_begin_success_3x2").command, 1);
+            dispatch(harness, UploadChunkCommand{0, {0xA8}}, 2);  // not itself a golden fixture
+            auto result = dispatch(harness, fixture.command, 3);
+            assertFixtureMatches(fixture, result);
+            continue;
+        }
+
+        EngineHarness harness;
+        auto result = dispatch(harness, fixture.command, 1);
+        assertFixtureMatches(fixture, result);
+    }
+}
+
 void test_two_sessions_do_not_corrupt_each_others_upload_via_the_engine() {
     FakeBarcodeDevice deviceA, deviceB;
     FakePresetRepository presetsA, presetsB;
@@ -349,6 +500,7 @@ int main() {
     test_close_home_backlight_match_golden_fixtures();
     test_upload_round_trip_matches_golden_fixtures();
     test_upload_chunk_wrong_offset_matches_golden_fixture();
+    test_all_golden_fixtures_replay_correctly();
     test_reboot_is_replayed_and_triggers_device_control_only_once();
     test_two_sessions_do_not_corrupt_each_others_upload_via_the_engine();
     if (failures != 0) {
