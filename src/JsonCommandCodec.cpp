@@ -213,8 +213,10 @@ bool JsonCommandCodec::decode(const std::string& commandName, JsonObjectConst re
     }
     if (commandName == "upload_begin") {
         UploadBeginCommand command;
-        command.width = static_cast<uint16_t>(request["width"] | 0);
-        command.height = static_cast<uint16_t>(request["height"] | 0);
+        const int rawWidth = request["width"] | 0;
+        const int rawHeight = request["height"] | 0;
+        command.width = static_cast<uint16_t>(std::clamp(rawWidth, 0, 65535));
+        command.height = static_cast<uint16_t>(std::clamp(rawHeight, 0, 65535));
         command.linear = request["linear"] | false;
         command.quiet = static_cast<uint8_t>(std::clamp<int>(request["quiet"] | 4, 0, 32));
         Rotation rotation = Rotation::Auto;
