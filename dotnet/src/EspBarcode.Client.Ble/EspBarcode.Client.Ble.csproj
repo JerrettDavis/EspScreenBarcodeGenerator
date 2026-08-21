@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>EspBarcode.Client.Ble</PackageId>
+    <Description>Windows BLE GATT connector for EspLink v2 (CarrierProfileId.BleGattV1) using WinRT Bluetooth LE.</Description>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EspBarcode.Connectivity\EspBarcode.Connectivity.csproj" />
+  </ItemGroup>
+
+</Project>

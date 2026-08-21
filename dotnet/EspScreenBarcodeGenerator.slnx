@@ -6,6 +6,7 @@
   <Folder Name="/src/">
     <Project Path="src/EspBarcode.Cli/EspBarcode.Cli.csproj" />
     <Project Path="src/EspBarcode.Client/EspBarcode.Client.csproj" />
+    <Project Path="src/EspBarcode.Client.Ble/EspBarcode.Client.Ble.csproj" />
     <Project Path="src/EspBarcode.Connectivity/EspBarcode.Connectivity.csproj" />
     <Project Path="src/EspBarcode.Generator/EspBarcode.Generator.csproj" />
     <Project Path="src/EspBarcode.Protocol/EspBarcode.Protocol.csproj" />

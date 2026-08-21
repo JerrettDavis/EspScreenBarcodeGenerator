@@ -4,6 +4,7 @@
 
 #include "BarcodeApplication.h"
 #include "BarcodeApplicationAdapter.h"
+#include "BleGattEndpoint.h"
 #include "ControlProtocolEngine.h"
 #include "ControlSession.h"
 #include "EspIdfDeviceControl.h"
@@ -22,9 +23,11 @@ esplink::ControlProtocolEngine engine(applicationAdapter, applicationAdapter, de
 esplink::ControlSession legacySession(esplink::ControlSessionId{1}, esplink::ControllerId{1});
 esplink::ControlSession v2Session(esplink::ControlSessionId{2}, esplink::ControllerId{1});
 esplink::ControlSession espNowSession(esplink::ControlSessionId{3}, esplink::ControllerId{1});
+esplink::ControlSession bleSession(esplink::ControlSessionId{4}, esplink::ControllerId{1});
 esplink::SerialLegacyEndpoint legacyEndpoint(engine, legacySession, deviceControl, applicationAdapter);
 esplink::SerialCobsEndpoint cobsEndpoint(engine, v2Session, applicationAdapter);
 esplink::EspNowEndpoint espNowEndpoint(engine, espNowSession, applicationAdapter);
+esplink::BleGattEndpoint bleEndpoint(engine, bleSession, applicationAdapter);
 ActiveTransport active = ActiveTransport::Legacy;
 }  // namespace
 
@@ -40,13 +43,21 @@ void setup() {
     }
     legacyEndpoint.begin();
 
-    // ESP-NOW runs on its own radio, independent of whichever serial transport is active
-    // above — a failure here is reported but not fatal to the rest of the device.
+    // ESP-NOW and BLE each run on their own radio/stack, independent of whichever serial
+    // transport is active above — a failure in either is reported but not fatal to the
+    // rest of the device.
     std::string espNowError;
     if (espNowEndpoint.begin(espNowError)) {
         Serial.printf("{\"event\":\"espnow_ready\",\"mac\":\"%s\"}\n", espNowEndpoint.macAddress().c_str());
     } else {
         Serial.printf("{\"event\":\"espnow_error\",\"message\":\"%s\"}\n", espNowError.c_str());
+    }
+
+    std::string bleError;
+    if (bleEndpoint.begin("EspScreenBarcodeGenerator", bleError)) {
+        Serial.printf("{\"event\":\"ble_ready\"}\n");
+    } else {
+        Serial.printf("{\"event\":\"ble_error\",\"message\":\"%s\"}\n", bleError.c_str());
     }
 }
 
@@ -58,6 +69,7 @@ void loop() {
         cobsEndpoint.loop();
     }
     espNowEndpoint.loop();
+    bleEndpoint.loop();
     application.loop();
     delay(1);
 }

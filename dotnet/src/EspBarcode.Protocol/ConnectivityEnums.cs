@@ -18,6 +18,7 @@ public enum CarrierProfileId : byte
 {
     Unspecified = 0, EspNowV1 = 1, EspNowV2 = 2, StreamSmall = 3,
     StreamStandard = 4, StreamLarge = 5, TcpStandard = 6, TcpLarge = 7,
+    BleGattV1 = 8,
 }
 
 public enum CodecError

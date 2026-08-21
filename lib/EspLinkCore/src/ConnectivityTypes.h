@@ -23,6 +23,7 @@ enum class CarrierProfileId : uint8_t {
     StreamLarge = 5,
     TcpStandard = 6,
     TcpLarge = 7,
+    BleGattV1 = 8,
 };
 
 enum class CapabilityState : uint8_t {
