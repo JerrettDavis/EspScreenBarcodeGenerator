@@ -406,7 +406,7 @@ void JsonCommandCodec::encode(const Response& response, JsonObjectConst request,
             out["cmd"] = "download";
         }
     }, response);
-    encodeBody(response, out.to<JsonObject>());
+    encodeBody(response, out.as<JsonObject>());
 }
 
 void JsonCommandCodec::encodeError(const ProtocolError& error, JsonObjectConst request, JsonDocument& out) {
