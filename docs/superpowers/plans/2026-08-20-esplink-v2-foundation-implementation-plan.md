@@ -5595,3 +5595,93 @@ git commit -m "docs: record EspLink v2 foundation completion summary and verific
 Report the four items the user's original `/goal` explicitly asked for — implementation summary, architecture changes, test results, known hardware-validation gaps, and recommended next-PR scope — as your final message to the user, not only in the committed file.
 
 ---
+
+## Completion summary
+
+### 1. What shipped
+
+**Firmware (Tasks 1-9):** a new Arduino-free library, `lib/EspLinkCore`, holding the protocol's pure domain logic: `Identifiers.h` and `ConnectivityTypes.h` (the enumerant vocabulary — `RunMode`, `TransportKind`, `CarrierProfileId`, `CapabilityState`, `OptimizationGoal`, `TrafficClass`, `Idempotency`, `MessageKind`, `ServiceId`, `CodecId`, `FrameType`, `FallbackPolicy`, `ModeTransition`), `SelectionPolicy.h` (pure `evaluateSelection`/`isFallbackAllowed` functions with no I/O), `CommandCatalog.h`/`ProtocolCommands.h` (the 18 typed v1 commands as a closed variant, replacing stringly-typed dispatch), the EspLink v2 wire codec (`Crc32`, `Envelope`, `HopFrame`, `Cobs`, `FrameAssembler`), `ApplicationPorts.h` (the `IBarcodeDevice`/`IPresetRepository`/`IDeviceControl` seams the engine talks through), and session types `TransferSession`/`ControlSession` that replace `UsbProtocol::UploadState` with session-scoped state. `ControlProtocolEngine` is the new typed dispatcher — no `Serial`, no `ArduinoJson` — that both transports now share. On the `src/` (Arduino) side: `BarcodeApplicationAdapter` and `EspIdfDeviceControl` implement the ports; `JsonCommandCodec` does JSON<->typed-command translation; `SerialLegacyEndpoint` replaces the deleted `UsbProtocol` for the v1 NDJSON path; `SerialCobsEndpoint` is the new, opt-in (via an explicit `upgrade` command) EspLink v2 COBS path over the same UART.
+
+**.NET (Tasks 10-13):** `EspBarcode.Protocol`, a byte-identical C# port of the firmware's envelope/frame/COBS/CRC/reassembly codec (verified against the same test vectors as the C++ side). `EspBarcode.Connectivity`, holding the value-object mirror of the firmware's connectivity types plus `TransportSelector`, and the typed v2 client core: `ILinkConnection`/`ILinkConnector` (transport seam), `InMemoryDuplexConnection` (loopback test double), `EspLinkLinkSession`/`EspLinkControlSession` (the client-side counterpart to firmware's `ControlSession`). `EspBarcode.Client`'s new `TransportV2` namespace adds `UpgradeHandshake` (sends the v1 `upgrade` request), `SerialLinkConnection` (`ILinkConnection` over a `SerialPort`), and `SerialV2Connector` (drives the handshake then hands the *same* already-open `SerialPort` to the v2 byte layer, so the upgrade doesn't trigger a second DTR/RTS device reset).
+
+**Real bugs found and fixed during implementation** (all confirmed still correctly fixed in the current worktree as of this task):
+1. `lib/EspLinkCore/src/Cobs.cpp` and `dotnet/src/EspBarcode.Protocol/Cobs.cs` — the original scan-based COBS encoder silently dropped data when input ended in `0x00` or a 254-byte run was immediately followed by `0x00`. Fixed with the standard backpatch algorithm in both languages, with regression tests for both failure modes.
+2. `src/JsonCommandCodec.cpp`'s `encode()` — `out.to<JsonObject>()` silently cleared `ok`/`cmd`/`id` from every v1 success response (ArduinoJson v7's `to<T>()` clears the document first). Fixed to `out.as<JsonObject>()`.
+3. `src/JsonCommandCodec.cpp`'s `upload_begin` decode — raw JSON int width/height was narrowed to `uint16_t` before the engine's `1-512` bounds check, letting e.g. `width:65539` wrap to `3` and bypass validation. Fixed by clamping to `[0,65535]` before the cast.
+4. `dotnet/src/EspBarcode.Connectivity/Client/EspLinkControlSession.cs`'s `SendCommandAsync` — leaked `_pending` dictionary entries on timeout/cancellation (only removed on a matching response). Fixed with `try/finally`.
+5. `dotnet/src/EspBarcode.Client/TransportV2/SerialLinkConnection.cs`'s `ReadAsync` — `SerialPort.BaseStream.ReadAsync` never completes on Windows when started before data is pending (hardware-confirmed platform gap). Fixed by routing through synchronous `SerialPort.Read` on a background thread with `TimeoutException` retry.
+
+### 2. Architecture changes
+
+- New dependency direction on firmware: `SerialLegacyEndpoint`/`SerialCobsEndpoint` (Serial, ArduinoJson) -> `JsonCommandCodec` (ArduinoJson, no Serial) -> `ControlProtocolEngine` (no Arduino at all) -> `IBarcodeDevice`/`IPresetRepository`/`IDeviceControl` ports -> `BarcodeApplicationAdapter`/`EspIdfDeviceControl` (Arduino) -> `BarcodeApplication`.
+- `lib/EspLinkCore` has zero Arduino dependency by construction (a Global Constraint of this plan), which is what lets `tests/esplink_*_tests.cpp` and `tests/control_protocol_engine_tests.cpp` run on the host, under a normal `ctest` invocation, with no device attached.
+- `ControlSession`/`TransferSession` replace `UsbProtocol::UploadState` with session-scoped state; two sessions (e.g. the legacy and v2 endpoints running concurrently in `main.cpp`) cannot corrupt each other's in-flight upload/state — the property a future Bluetooth/Wi-Fi Direct/ESP-NOW connector depends on.
+- `ControlProtocolEngine` is a single typed dispatcher shared by both `SerialLegacyEndpoint` (v1 NDJSON) and `SerialCobsEndpoint` (v2 COBS) — the same 18-command catalog and validation logic runs under either transport.
+- On .NET, `EspBarcode.Protocol` and `EspBarcode.Connectivity` are new, dependency-free-of-`System.IO.Ports` libraries; `EspBarcode.Client`'s `TransportV2` layer is the only place that touches a real `SerialPort`, mirroring the firmware's transport/engine split.
+- Both language codecs (envelope/frame/COBS/CRC) are verified byte-identical via shared test vectors, so a message encoded on one side decodes correctly on the other without a wire-format spec drift risk.
+
+### 3. Test results (verbatim from commands run in this task, worktree `.worktrees/esplink-v2-foundation`)
+
+**Step 1 — native C++ tests.** Sanitizers were requested (`-DESPBARCODE_ENABLE_SANITIZERS=ON`) but **could not run**: this environment's toolchain is MSYS2 MinGW-w64 GCC 14.2.0, which does not ship `libasan`/`libubsan` (`ld.exe: cannot find -lasan` / `cannot find -lubsan`) — confirmed by both the failed link and a filesystem search for `*asan*`/`*ubsan*` under the MinGW installation, which found nothing. Sanitizer-instrumented native testing is not available in this environment. Rebuilt and tested with `-DESPBARCODE_ENABLE_SANITIZERS=OFF` (same CMake/ctest sequence otherwise) to still get real pass/fail signal on the 6 target executables:
+
+```
+cmake -S . -B .build/native-validation -DBUILD_TESTING=ON -DESPBARCODE_ENABLE_SANITIZERS=OFF -G "MinGW Makefiles"
+cmake --build .build/native-validation
+ctest --test-dir .build/native-validation --output-on-failure
+```
+```
+1/6 Test #1: native_core_tests ................   Passed    0.21 sec
+2/6 Test #2: esplink_types_tests ..............   Passed    0.09 sec
+3/6 Test #3: esplink_selection_tests ..........   Passed    0.07 sec
+4/6 Test #4: esplink_golden_shape_tests .......   Passed    0.18 sec
+5/6 Test #5: esplink_codec_tests ..............   Passed    0.07 sec
+6/6 Test #6: control_protocol_engine_tests ....   Passed    0.24 sec
+100% tests passed, 0 tests failed out of 6
+```
+
+**Step 2 — firmware compile-check.** `pio run -e esp32dev` (run after `--target clean`, so this is a full rebuild, not a cache hit): `SUCCESS`, RAM 7.0% (23076/327680 bytes), Flash 15.6% (489537/3145728 bytes). Zero `warning:` lines in the build log (grepped explicitly); `firmware.bin` (478.4K) and `firmware.elf` (15.3M) produced in `.pio/build/esp32dev/`.
+
+**Step 3 — PlatformIO native/Unity suite (regression check).** `pio test -e native`:
+```
+9 test cases: 9 succeeded in 00:00:06.608
+```
+All 9 pre-existing cases in `test/test_native/test_main.cpp` (`test_base64_round_trip`, `test_retail_check_digits`, `test_matrix_encoders`, `test_qr_dependency_adapter`, `test_gs1_normalized_data_is_json_safe`, `test_pixel_exact_layout`, `test_random_payload_always_encodes`, `test_home_button_layout_has_no_overlaps_and_fits_screen`, `test_touch_pad_closes_gap_without_crossing_neighbor`) passed.
+
+**Step 4 — full .NET suite.** `dotnet build dotnet/EspScreenBarcodeGenerator.slnx`: `13 projects, 0 errors, 0 warnings`. `dotnet test dotnet/EspScreenBarcodeGenerator.slnx`:
+```
+Passed! - Failed: 0, Passed: 15,  Skipped: 0, Total: 15  - EspBarcode.Protocol.Tests.dll
+Passed! - Failed: 0, Passed: 106, Skipped: 0, Total: 106 - EspBarcode.Generator.Tests.dll
+Passed! - Failed: 0, Passed: 10,  Skipped: 0, Total: 10  - EspBarcode.Connectivity.Tests.dll
+Passed! - Failed: 0, Passed: 35,  Skipped: 0, Total: 35  - EspBarcode.Viewer.Cli.Tests.dll
+Passed! - Failed: 0, Passed: 19,  Skipped: 0, Total: 19  - EspBarcode.Client.Tests.dll
+```
+185/185 tests passed across all 5 test projects (the 3 pre-existing plus the 2 new ones this plan added).
+
+**Step 5 — static/regression checks and clean tree.**
+```
+python tests/static_firmware_checks.py   -> "Static firmware contract checks passed"
+python tests/test_host_tool.py           -> Ran 17 tests in 0.064s, OK
+git status --porcelain                   -> empty (clean tree)
+```
+No `.build/`, `.pio/`, or `dotnet/**/bin`/`obj` output leaked into git tracking.
+
+### 4. Known hardware-validation gaps
+
+- **Task 9 Step 6 (firmware USB v2 path):** `SerialLegacyEndpoint` -> `upgrade` -> `SerialCobsEndpoint`, all five mapped v2 commands, and COBS resync after a corrupted frame have no native/simulated test harness (same `ArduinoJson`/`Serial` constraint as the v1 codec, compounded by needing a real byte-level serial round trip). **Update since that task was written:** later in this session, real hardware validation (COM7, CH340 adapter) exercised the `upgrade` handshake and a `system.hello`->`system.welcome`/`barcode.generate`->`displayed:true` round trip successfully. Still not individually hardware-exercised: `system.ping`, `barcode.close`, `device.backlight.set` alone, COBS resync after a *deliberately corrupted* frame, and multi-fragment reassembly.
+- **Task 13 Step 7 (.NET `SerialV2Connector`):** the open -> `upgrade` -> raw COBS I/O path against real firmware has no test without a real `SerialPort`. **Update since that task was written:** real hardware validation this session ran 8/8 successful `system.hello`->`system.welcome` round trips across 2 independent process runs over the actual USB link.
+- `upload_abort` over v1 has not been hardware-exercised this session (only the 17/18-command sweep plus the width/height edge case were run live; `upload_abort` was not among them).
+- `.NET FallbackPolicy`/`isFallbackAllowed` has no C# port yet — confirmed absent (`find dotnet -iname "*FallbackPolicy*"` returns nothing). Deliberate scope cut, documented in `docs/PROTOCOL_V2.md`'s Next PRs section.
+- `SerialCobsEndpoint.h` still declares 3 unused members (`writeMessage`, `writeMessageWithResponse`, `v1NameFor`) — confirmed still present at `src/SerialCobsEndpoint.h:31-35`. Harmless (never called; `send`/`sendError` inline the same logic), noted as a cleanup opportunity.
+- MSVC cannot build this repo cleanly on this machine due to a pre-existing, unrelated `std::fill` narrowing warning in `lib/EspBarcodeCore/src/EspBarcodeCore.cpp:25` under `/W4 /WX` — not introduced by this plan. All native validation this session (Task 15 included) used the MinGW g++ generator instead. Still true as of this task.
+- New this task: this MinGW-w64 toolchain has no `libasan`/`libubsan`, so `-DESPBARCODE_ENABLE_SANITIZERS=ON` cannot actually link — sanitizer-instrumented native testing (ASan/UBSan) is unavailable in this environment entirely, not just unused. If sanitizer coverage is required, it needs a Linux/WSL or MSVC-with-a-different-warning-config runner.
+
+### 5. Behavioral notes (intentional, safe divergences from v1)
+
+- **`upload_begin.label` empty-string collapse** (`lib/EspLinkCore/src/ControlProtocolEngine.cpp:2944` — `upload.label = command.label.empty() ? "Uploaded matrix" : command.label;`): an explicitly empty string now collapses to the same default ("Uploaded matrix") as an absent field, whereas the original ArduinoJson-based code only substituted the default when the JSON key was literally absent. Safe: there is no user-visible difference between "explicitly empty" and "not provided" for a display label.
+- **`DownloadCommand::chunkBytes` negative-value clamp direction** (`lib/EspLinkCore/src/ControlProtocolEngine.cpp:3001` — `std::clamp<std::size_t>(command.chunkBytes, 48, 768)`): a negative `chunk_bytes` value, once implicitly converted to `std::size_t`, wraps to a very large unsigned value and clamps to the upper bound (768) instead of the original's lower bound (48). Harmless: the resulting chunk size stays within the documented 48-768 in-range either way, and no caller in this codebase sends a negative `chunk_bytes`.
+
+### 6. Recommended next PR scope
+
+See `docs/PROTOCOL_V2.md`'s "Next PRs" section (`## 10. Next PRs`, added in Task 14) for the three scoped follow-ups (Bluetooth RFCOMM, Wi-Fi Direct legacy GO + TCP, ESP-NOW USB gateway), each with an explicit "builds on" pointer into this plan's task outputs.
+
+---
