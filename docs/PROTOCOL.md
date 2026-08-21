@@ -1,5 +1,7 @@
 # USB Serial Protocol 1.0
 
+This is the default protocol; the device boots into it on every reset. For the opt-in binary EspLink v2 protocol (COBS hop frames, negotiated via an `upgrade` request sent over this v1 line protocol), see [`docs/PROTOCOL_V2.md`](PROTOCOL_V2.md).
+
 ## Transport
 
 - Physical connection: board USB connector through its USB-to-UART bridge.
