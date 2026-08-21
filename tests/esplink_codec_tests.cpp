@@ -144,6 +144,35 @@ void test_cobs_rejects_a_literal_zero_inside_the_block() {
     CHECK(!cobsDecode(corrupt.data(), corrupt.size(), decoded));
 }
 
+void test_cobs_round_trips_data_ending_in_zero() {
+    const std::vector<uint8_t> raw = {0x41, 0x00};
+    const auto encoded = cobsEncode(raw.data(), raw.size());
+    for (uint8_t b : encoded) CHECK(b != 0x00);
+    std::vector<uint8_t> decoded;
+    CHECK(cobsDecode(encoded.data(), encoded.size(), decoded));
+    CHECK(decoded == raw);
+}
+
+void test_cobs_round_trips_a_lone_zero_byte() {
+    const std::vector<uint8_t> raw = {0x00};
+    const auto encoded = cobsEncode(raw.data(), raw.size());
+    for (uint8_t b : encoded) CHECK(b != 0x00);
+    std::vector<uint8_t> decoded;
+    CHECK(cobsDecode(encoded.data(), encoded.size(), decoded));
+    CHECK(decoded == raw);
+}
+
+void test_cobs_round_trips_254_byte_run_followed_by_zero() {
+    std::vector<uint8_t> raw(254, 0x41);
+    raw.push_back(0x00);
+    raw.push_back(0x42);
+    const auto encoded = cobsEncode(raw.data(), raw.size());
+    for (uint8_t b : encoded) CHECK(b != 0x00);
+    std::vector<uint8_t> decoded;
+    CHECK(cobsDecode(encoded.data(), encoded.size(), decoded));
+    CHECK(decoded == raw);
+}
+
 // Vector D: barcode.generate split across two fragments over espnow-v1 (max payload 214),
 // linkSessionId=2002, linkMessageId=5.
 void test_frame_assembler_reassembles_two_fragments_in_order() {
@@ -237,6 +266,9 @@ int main() {
     test_hop_frame_decode_rejects_corrupted_payload();
     test_cobs_round_trips_a_frame_containing_zero_bytes();
     test_cobs_rejects_a_literal_zero_inside_the_block();
+    test_cobs_round_trips_data_ending_in_zero();
+    test_cobs_round_trips_a_lone_zero_byte();
+    test_cobs_round_trips_254_byte_run_followed_by_zero();
     test_frame_assembler_reassembles_two_fragments_in_order();
     test_frame_assembler_ignores_exact_duplicate_fragment();
     test_frame_assembler_flags_conflicting_duplicate_fragment();

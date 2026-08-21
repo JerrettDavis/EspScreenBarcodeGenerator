@@ -5,22 +5,27 @@ namespace esplink {
 std::vector<uint8_t> cobsEncode(const uint8_t* data, std::size_t length) {
     std::vector<uint8_t> out;
     out.reserve(length + length / 254 + 2);
-    std::size_t read = 0;
-    while (true) {
-        std::size_t blockStart = read;
-        std::size_t blockLen = 0;
-        while (read < length && data[read] != 0x00 && blockLen < 254) { ++read; ++blockLen; }
-        const bool hitZero = read < length && data[read] == 0x00;
-        out.push_back(static_cast<uint8_t>(blockLen + 1));
-        out.insert(out.end(), data + blockStart, data + blockStart + blockLen);
-        if (hitZero) {
-            ++read;
-            if (read >= length) break;
-        } else if (read >= length) {
-            break;
+    std::size_t codeIndex = 0;
+    out.push_back(0);  // placeholder for the first code byte, backpatched below
+    uint8_t code = 1;
+    for (std::size_t i = 0; i < length; ++i) {
+        if (data[i] == 0x00) {
+            out[codeIndex] = code;
+            codeIndex = out.size();
+            out.push_back(0);  // placeholder for the next code byte
+            code = 1;
+        } else {
+            out.push_back(data[i]);
+            ++code;
+            if (code == 0xFF) {
+                out[codeIndex] = code;
+                codeIndex = out.size();
+                out.push_back(0);  // placeholder
+                code = 1;
+            }
         }
-        // else: blockLen hit the 254 cap mid-run; loop continues with code 255 on the next block.
     }
+    out[codeIndex] = code;  // finalize the last (possibly empty) group unconditionally
     return out;
 }
 
