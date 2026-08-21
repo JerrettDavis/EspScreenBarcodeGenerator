@@ -80,7 +80,7 @@ void SerialCobsEndpoint::processMessage(const MessageEnvelope& envelope, const s
         return;
     }
 
-    engine_.handle(session_, command, OperationId{nextOperationId_++}, "usb-cobs-v2", *this);
+    engine_.handle(session_, command, OperationId{envelope.operationId}, "usb-cobs-v2", *this);
 }
 
 void SerialCobsEndpoint::send(const Response& response) {
@@ -112,7 +112,7 @@ void SerialCobsEndpoint::send(const Response& response) {
     envelope.serviceId = ServiceId::System;
     envelope.codecId = CodecId::Json;
     envelope.controlSessionId = session_.id().value;
-    envelope.operationId = nextOperationId_++;
+    envelope.operationId = nextResponseOperationId_++;
     envelope.correlationId = currentRequestOperationId_;
 
     std::vector<uint8_t> message;
@@ -154,7 +154,7 @@ void SerialCobsEndpoint::sendError(const ProtocolError& error) {
     envelope.serviceId = ServiceId::System;
     envelope.codecId = CodecId::Json;
     envelope.controlSessionId = session_.id().value;
-    envelope.operationId = nextOperationId_++;
+    envelope.operationId = nextResponseOperationId_++;
     envelope.correlationId = currentRequestOperationId_;
 
     std::vector<uint8_t> message;

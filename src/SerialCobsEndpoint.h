@@ -40,7 +40,7 @@ private:
     FrameAssembler assembler_;
     std::vector<uint8_t> rxBlock_;
     uint32_t linkMessageCounter_ = 1;
-    uint64_t nextOperationId_ = 1;
+    uint64_t nextResponseOperationId_ = 1;
     uint64_t currentRequestOperationId_ = 0;
     std::string currentRequestName_;
 };
