@@ -17,7 +17,9 @@ def require(text: str, pattern: str, source: str) -> None:
 def main() -> int:
     ini = (ROOT / "platformio.ini").read_text(encoding="utf-8")
     config = (ROOT / "include" / "app_config.h").read_text(encoding="utf-8")
-    protocol = (ROOT / "src" / "UsbProtocol.cpp").read_text(encoding="utf-8")
+    protocol = ((ROOT / "src" / "JsonCommandCodec.cpp").read_text(encoding="utf-8") +
+                (ROOT / "src" / "SerialLegacyEndpoint.cpp").read_text(encoding="utf-8") +
+                (ROOT / "lib" / "EspLinkCore" / "src" / "ControlProtocolEngine.cpp").read_text(encoding="utf-8"))
     application = (ROOT / "src" / "BarcodeApplication.cpp").read_text(encoding="utf-8")
 
     checks = {
@@ -53,11 +55,11 @@ def main() -> int:
     }
     missing = sorted(command for command in commands if f'command == "{command}"' not in protocol and f'"{command}"' not in protocol)
     if missing:
-        raise AssertionError(f"UsbProtocol.cpp: missing required commands: {', '.join(missing)}")
+        raise AssertionError(f"firmware protocol sources: missing required commands: {', '.join(missing)}")
 
     for token in ("base64-packed-msb-first", "crc32", "line_too_long", "unexpected_offset"):
         if token not in protocol:
-            raise AssertionError(f"UsbProtocol.cpp: missing protocol safety token {token}")
+            raise AssertionError(f"firmware protocol sources: missing protocol safety token {token}")
 
     print("Static firmware contract checks passed")
     return 0
