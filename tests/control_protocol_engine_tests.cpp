@@ -1,4 +1,5 @@
 #include "ApplicationPorts.h"
+#include "ControlSession.h"
 
 #include <iostream>
 #include <map>
@@ -144,11 +145,62 @@ void test_fake_preset_repository_round_trip() {
     CHECK(!presets.load("NOPE", loaded, error));
 }
 
+void test_two_sessions_do_not_share_transfer_state() {
+    ControlSession sessionA{ControlSessionId{1}, ControllerId{100}};
+    ControlSession sessionB{ControlSessionId{2}, ControllerId{200}};
+
+    sessionA.transfer().upload().active = true;
+    sessionA.transfer().upload().bytes = {0xAA, 0xBB};
+    sessionA.transfer().upload().nextOffset = 2;
+
+    CHECK(!sessionB.transfer().upload().active);
+    CHECK(sessionB.transfer().upload().bytes.empty());
+    CHECK(sessionB.transfer().upload().nextOffset == 0);
+}
+
+void test_lease_cannot_be_acquired_twice_by_the_same_session() {
+    ControlSession session{ControlSessionId{1}, ControllerId{100}};
+    CHECK(session.tryAcquireLease());
+    CHECK(!session.tryAcquireLease());
+    session.releaseLease();
+    CHECK(session.tryAcquireLease());
+}
+
+void test_duplicate_result_cache_round_trips_and_replays() {
+    ControlSession session{ControlSessionId{1}, ControllerId{100}};
+    CHECK(!session.lookupCachedResult(OperationId{42}).has_value());
+
+    ControlSession::CommandResult result = Response{SimpleOkResponse{"save", "preset saved"}};
+    session.cacheResult(OperationId{42}, result);
+
+    auto cached = session.lookupCachedResult(OperationId{42});
+    CHECK(cached.has_value());
+    CHECK(std::holds_alternative<Response>(*cached));
+    const auto& response = std::get<Response>(*cached);
+    CHECK(std::holds_alternative<SimpleOkResponse>(response));
+    CHECK(std::get<SimpleOkResponse>(response).message == "preset saved");
+}
+
+void test_duplicate_result_cache_evicts_oldest_when_full() {
+    ControlSession session{ControlSessionId{1}, ControllerId{100}};
+    for (uint64_t i = 0; i < 9; ++i) {
+        ControlSession::CommandResult result = Response{SimpleOkResponse{"op", std::to_string(i)}};
+        session.cacheResult(OperationId{i}, result);
+    }
+    // Capacity is 8; operation 0 should have been evicted by operation 8.
+    CHECK(!session.lookupCachedResult(OperationId{0}).has_value());
+    CHECK(session.lookupCachedResult(OperationId{8}).has_value());
+}
+
 }  // namespace
 
 int main() {
     test_fake_barcode_device_generate_and_display();
     test_fake_preset_repository_round_trip();
+    test_two_sessions_do_not_share_transfer_state();
+    test_lease_cannot_be_acquired_twice_by_the_same_session();
+    test_duplicate_result_cache_round_trips_and_replays();
+    test_duplicate_result_cache_evicts_oldest_when_full();
     if (failures != 0) {
         std::cerr << failures << " control protocol engine test(s) failed\n";
         return EXIT_FAILURE;
