@@ -36,6 +36,13 @@ public sealed class SerialPortTransport : IEspBarcodeTransport
         _port.DiscardInBuffer();
     }
 
+    /// <summary>
+    /// The underlying open <see cref="SerialPort"/>, for callers (like <c>SerialV2Connector</c>)
+    /// that need to hand the same physical connection to a different framing layer without
+    /// closing and reopening it — reopening re-triggers the DTR/RTS reset above.
+    /// </summary>
+    public SerialPort UnderlyingPort => _port;
+
     public void WriteLine(string line) => _port.WriteLine(line);
 
     public string? ReadLine()
