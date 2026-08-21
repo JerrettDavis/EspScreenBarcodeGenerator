@@ -35,9 +35,48 @@ endfunction()
 
 espbarcode_enable_sanitizers(EspBarcodeCore)
 
+set(ESPLINKCORE_SOURCES
+    lib/EspLinkCore/src/Crc32.cpp
+    lib/EspLinkCore/src/Envelope.cpp
+    lib/EspLinkCore/src/HopFrame.cpp
+    lib/EspLinkCore/src/Cobs.cpp
+    lib/EspLinkCore/src/FrameAssembler.cpp
+    lib/EspLinkCore/src/ControlSession.cpp
+    lib/EspLinkCore/src/ControlProtocolEngine.cpp
+)
+add_library(EspLinkCore STATIC ${ESPLINKCORE_SOURCES})
+target_include_directories(EspLinkCore PUBLIC lib/EspLinkCore/src)
+target_link_libraries(EspLinkCore PUBLIC EspBarcodeCore)
+if(MSVC)
+    target_compile_options(EspLinkCore PRIVATE /W4 /WX)
+else()
+    target_compile_options(EspLinkCore PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+espbarcode_enable_sanitizers(EspLinkCore)
+
 add_executable(native_core_tests tests/native_core_tests.cpp)
 target_link_libraries(native_core_tests PRIVATE EspBarcodeCore)
 espbarcode_enable_sanitizers(native_core_tests)
+
+add_executable(esplink_types_tests tests/esplink_types_tests.cpp)
+target_link_libraries(esplink_types_tests PRIVATE EspLinkCore)
+espbarcode_enable_sanitizers(esplink_types_tests)
+
+add_executable(esplink_selection_tests tests/esplink_selection_tests.cpp)
+target_link_libraries(esplink_selection_tests PRIVATE EspLinkCore)
+espbarcode_enable_sanitizers(esplink_selection_tests)
+
+add_executable(esplink_golden_shape_tests tests/esplink_golden_shape_tests.cpp)
+target_link_libraries(esplink_golden_shape_tests PRIVATE EspLinkCore)
+espbarcode_enable_sanitizers(esplink_golden_shape_tests)
+
+add_executable(esplink_codec_tests tests/esplink_codec_tests.cpp)
+target_link_libraries(esplink_codec_tests PRIVATE EspLinkCore)
+espbarcode_enable_sanitizers(esplink_codec_tests)
+
+add_executable(control_protocol_engine_tests tests/control_protocol_engine_tests.cpp)
+target_link_libraries(control_protocol_engine_tests PRIVATE EspLinkCore)
+espbarcode_enable_sanitizers(control_protocol_engine_tests)
 
 add_executable(barcode_native tools/native_cli.cpp)
 target_link_libraries(barcode_native PRIVATE EspBarcodeCore)
@@ -46,4 +85,9 @@ espbarcode_enable_sanitizers(barcode_native)
 include(CTest)
 if(BUILD_TESTING)
     add_test(NAME native_core_tests COMMAND native_core_tests)
+    add_test(NAME esplink_types_tests COMMAND esplink_types_tests)
+    add_test(NAME esplink_selection_tests COMMAND esplink_selection_tests)
+    add_test(NAME esplink_golden_shape_tests COMMAND esplink_golden_shape_tests)
+    add_test(NAME esplink_codec_tests COMMAND esplink_codec_tests)
+    add_test(NAME control_protocol_engine_tests COMMAND control_protocol_engine_tests)
 endif()

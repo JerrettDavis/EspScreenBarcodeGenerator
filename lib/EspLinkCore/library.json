@@ -1,0 +1,7 @@
+{
+  "name": "EspLinkCore",
+  "version": "0.1.0",
+  "description": "Transport-independent EspLink v2 protocol, session, and connectivity core. No Arduino dependency.",
+  "frameworks": "*",
+  "platforms": "*"
+}

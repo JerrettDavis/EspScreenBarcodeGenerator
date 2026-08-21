@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>EspBarcode.Connectivity</PackageId>
+    <Description>Transport-kind value objects and the pure connectivity selection policy. Portable — no serial/WinRT dependency.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EspBarcode.Protocol\EspBarcode.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>

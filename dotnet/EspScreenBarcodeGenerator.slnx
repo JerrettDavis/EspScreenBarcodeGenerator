@@ -6,13 +6,17 @@
   <Folder Name="/src/">
     <Project Path="src/EspBarcode.Cli/EspBarcode.Cli.csproj" />
     <Project Path="src/EspBarcode.Client/EspBarcode.Client.csproj" />
+    <Project Path="src/EspBarcode.Connectivity/EspBarcode.Connectivity.csproj" />
     <Project Path="src/EspBarcode.Generator/EspBarcode.Generator.csproj" />
+    <Project Path="src/EspBarcode.Protocol/EspBarcode.Protocol.csproj" />
     <Project Path="src/EspBarcode.Viewer.Cli/EspBarcode.Viewer.Cli.csproj" />
     <Project Path="src/EspBarcode.Viewer.Gui/EspBarcode.Viewer.Gui.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/EspBarcode.Client.Tests/EspBarcode.Client.Tests.csproj" />
+    <Project Path="tests/EspBarcode.Connectivity.Tests/EspBarcode.Connectivity.Tests.csproj" />
     <Project Path="tests/EspBarcode.Generator.Tests/EspBarcode.Generator.Tests.csproj" />
+    <Project Path="tests/EspBarcode.Protocol.Tests/EspBarcode.Protocol.Tests.csproj" />
     <Project Path="tests/EspBarcode.Viewer.Cli.Tests/EspBarcode.Viewer.Cli.Tests.csproj" />
   </Folder>
 </Solution>

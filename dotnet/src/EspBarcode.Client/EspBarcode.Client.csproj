@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EspBarcode.Generator\EspBarcode.Generator.csproj" />
+    <ProjectReference Include="..\EspBarcode.Connectivity\EspBarcode.Connectivity.csproj" />
   </ItemGroup>
 
 </Project>

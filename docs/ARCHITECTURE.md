@@ -7,36 +7,73 @@
 ## Component model
 
 ```text
-                     USB cable
-                         |
-                 USB-to-UART bridge
-                         |
-          newline-delimited JSON protocol
-                         |
-+------------------------v-------------------------+
-|                    ESP32 firmware                |
-|                                                  |
-|  +----------------+     +---------------------+  |
-|  | UsbProtocol    |---->| BarcodeApplication  |  |
-|  | IDs, errors,   |     | State + workflows   |  |
-|  | chunks, CRC32  |     +----+-----------+----+  |
-|  +----------------+          |           |       |
-|                              |           |       |
-|                    +---------v--+   +----v-----+ |
-|                    | Core       |   | Presets | |
-|                    | encoders + |   | LittleFS| |
-|                    | layout     |   +----------+ |
-|                    +---------+--+                |
-|                              |                   |
-|                    integer module rectangles     |
-|                              |                   |
-|                    +---------v----------+        |
-|                    | TFT_eSPI / ST7796U |        |
-|                    +--------------------+        |
-|                         ^                        |
-|                         | XPT2046 touch          |
-|                 direct touch UI/keyboard         |
-+--------------------------------------------------+
+USB cable -> USB-to-UART bridge -> NDJSON (v1, default) or COBS hop frames (v2, opt-in)
+                                        |
+                                        v
+                              ESP32 firmware
+--------------------------------------------------------------------
+  SerialLegacyEndpoint (Serial, ArduinoJson)   SerialCobsEndpoint (Serial, ArduinoJson)
+                    \                              /
+                     v                            v
+                       JsonCommandCodec (ArduinoJson, no Serial)
+                                        |
+                                        v
+                  ControlProtocolEngine (lib/EspLinkCore, no Arduino at all)
+                                        |
+                                        v
+        IBarcodeDevice  /  IPresetRepository  /  IDeviceControl   (ports)
+                    /                              \
+                   v                                v
+     BarcodeApplicationAdapter (Arduino)   EspIdfDeviceControl (Arduino)
+     (implements IBarcodeDevice,           (implements IDeviceControl:
+      IPresetRepository)                    backlight, reboot, free heap)
+                   |
+                   v
+                BarcodeApplication (state + workflows)
+                   |                    \
+                   v                     v
+        Core (encoders + layout)      Presets (LittleFS)
+                   |
+                   v
+        integer module rectangles
+                   |
+                   v
+        TFT_eSPI / ST7796U
+                   ^
+                   | XPT2046 touch
+        direct touch UI/keyboard
+--------------------------------------------------------------------
+```
+
+## EspLink v2 foundation
+
+The dependency direction runs strictly one way, transport-specific code at the edges and pure domain logic at the center:
+
+```text
+SerialLegacyEndpoint / SerialCobsEndpoint  (Serial, ArduinoJson)
+        -> JsonCommandCodec                (ArduinoJson, no Serial)
+        -> ControlProtocolEngine           (no Arduino at all — lib/EspLinkCore)
+        -> IBarcodeDevice / IPresetRepository / IDeviceControl  (ports)
+        -> BarcodeApplicationAdapter / EspIdfDeviceControl      (Arduino)
+        -> BarcodeApplication
+```
+
+`lib/EspLinkCore` (`Envelope`, `HopFrame`, `Cobs`, `FrameAssembler`, `ControlSession`, `TransferSession`, `ControlProtocolEngine`, `SelectionPolicy`) declares zero Arduino dependency (`lib/EspLinkCore/library.json`). `JsonCommandCodec` links ArduinoJson for its `JsonObjectConst`/`JsonDocument` types but never touches `Serial` — only `SerialLegacyEndpoint` and `SerialCobsEndpoint` own the `Serial` object. This is why `tests/esplink_codec_tests.cpp`, `tests/esplink_golden_shape_tests.cpp`, `tests/esplink_selection_tests.cpp`, `tests/esplink_types_tests.cpp`, and `tests/control_protocol_engine_tests.cpp` all build and run as plain host binaries, with no ESP32 attached and no PlatformIO upload step.
+
+`esplink::ControlSession` and `esplink::TransferSession` replace the old monolithic `UsbProtocol::UploadState`. Each `ControlSession` (one per active connector — `main.cpp` constructs a separate `legacySession` and `v2Session`) owns its own `TransferSession`, its own write lease (`tryAcquireLease`/`releaseLease`/`hasLease`), and its own duplicate-result cache. The property this buys, and that a future Bluetooth/Wi-Fi Direct/ESP-NOW-gateway connector depends on holding: **two sessions can never corrupt each other's in-flight upload or replay each other's cached command result**, because each session's state is a separate object, not shared globals. A new transport can be added without auditing every existing transport's upload/replay state for cross-contamination.
+
+```mermaid
+flowchart TB
+    A["SerialLegacyEndpoint<br/>(v1, Serial + ArduinoJson)"] --> C[JsonCommandCodec]
+    B["SerialCobsEndpoint<br/>(v2, Serial + ArduinoJson)"] --> C
+    C --> E["ControlProtocolEngine<br/>(lib/EspLinkCore, no Arduino)"]
+    E --> P1[IBarcodeDevice]
+    E --> P2[IPresetRepository]
+    E --> P3[IDeviceControl]
+    P1 --> AD[BarcodeApplicationAdapter]
+    P2 --> AD
+    P3 --> DC[EspIdfDeviceControl]
+    AD --> BA[BarcodeApplication]
 ```
 
 ## Portable barcode core
@@ -75,9 +112,9 @@ No resized bitmap is pushed to the screen. This avoids filtering artifacts and k
 
 ## USB transport
 
-The ESP32-WROOM-32E does not expose native USB device functionality. The board's connector reaches the ESP32 through a USB-to-UART bridge, so the PoC exposes an ordinary COM/tty port at 115200 baud.
+The ESP32-WROOM-32E does not expose native USB device functionality. The board's connector reaches the ESP32 through a USB-to-UART bridge, so the PoC exposes an ordinary COM/tty port at 115200 baud. The device boots into one endpoint and, for v2, transitions to the other on request — there is no dual-listening mode.
 
-The application protocol is deliberately independent of UART framing:
+`SerialLegacyEndpoint` (v1, default) speaks USB Serial Protocol 1.0 — one UTF-8 JSON object per newline-terminated line, unchanged from prior releases. See [`docs/PROTOCOL.md`](PROTOCOL.md) for the full command/error reference. The application protocol is deliberately independent of UART framing:
 
 - UTF-8 JSON object per line.
 - Optional caller-supplied `id`, echoed in responses.
@@ -85,7 +122,9 @@ The application protocol is deliberately independent of UART framing:
 - Chunked binary transfer represented as Base64.
 - Declared dimensions, sequential offsets, exact byte counts, and CRC32.
 
-A later Windows service, virtual device driver, WebSerial client, TCP bridge, or BLE adapter can map the same request model to a different transport.
+`SerialCobsEndpoint` (v2, opt-in) speaks EspLink v2: COBS-delimited binary hop frames carrying a binary message envelope carrying a JSON control body. A host requests the switch with the v1 command `{"cmd":"upgrade"}`; the firmware acknowledges over NDJSON, then switches its `loop()` to the COBS endpoint for the rest of the boot. See [`docs/PROTOCOL_V2.md`](PROTOCOL_V2.md) for the wire format, the current 5-command v2 subset, and the extension guide for adding a new transport.
+
+A later Windows service, virtual device driver, WebSerial client, TCP bridge, Bluetooth, or Wi-Fi Direct connector maps the same `ControlProtocolEngine`/envelope/frame layers (§ EspLink v2 foundation) to a different carrier — see `docs/PROTOCOL_V2.md`'s extension guide.
 
 ## Persistence
 
@@ -125,6 +164,6 @@ A 320x480 display normally imposes a much smaller practical module count than th
 - Add PDF417 as a new portable encoder while retaining raw upload compatibility.
 - Add named preset entry through a touch keyboard modal.
 - Add test sequences/playlists that advance through symbols on scanner feedback or a timed schedule.
-- Add Wi-Fi/BLE transports that feed the same command dispatcher.
+- Add a new transport (Bluetooth RFCOMM, Wi-Fi Direct TCP, an ESP-NOW gateway) by implementing a new connector/endpoint against `lib/EspLinkCore`'s ports (`ControlProtocolEngine`, the `Envelope`/`HopFrame`/`Cobs` codecs, `IControlResponseSink`) — see [`docs/PROTOCOL_V2.md`](PROTOCOL_V2.md)'s extension guide and "Next PRs" section for the concrete steps and known gaps (including the .NET `TransportSelector` fallback-policy parity gap).
 - Add scanner-to-device feedback input for automated pass/fail correlation.
 - Move to ESP32-S3 hardware for true USB CDC/HID/vendor-class functionality without a bridge.
