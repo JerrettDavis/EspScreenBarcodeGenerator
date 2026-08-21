@@ -48,8 +48,8 @@ public:
 
     virtual void setBacklight(bool on) = 0;
     virtual uint32_t freeHeapBytes() const = 0;
-    // Triggers the actual restart. Callers that must flush a transport-specific
-    // stream first (e.g. Serial.flush()) do so before calling this.
+    // Triggers the actual restart. Implementations are responsible for flushing
+    // any transport-specific stream (e.g. Serial.flush()) before restarting.
     virtual void reboot() = 0;
 };
 

@@ -117,17 +117,8 @@ void SerialLegacyEndpoint::processLine(const std::string& line) {
     }
 
     currentRequest_ = request;
-    pendingReboot_ = std::holds_alternative<RebootCommand>(command);
     engine_.handle(session_, command, OperationId{nextOperationId_++}, "usb-uart-ndjson", *this);
     currentRequest_ = JsonObjectConst();
-
-    if (pendingReboot_) {
-        Serial.flush();
-        delay(100);
-        // ControlProtocolEngine already called deviceControl_.reboot() before returning
-        // from handle() (see Task 7) — nothing further to do here except make sure the
-        // acknowledgement above reached the host first.
-    }
 }
 
 void SerialLegacyEndpoint::send(const Response& response) {

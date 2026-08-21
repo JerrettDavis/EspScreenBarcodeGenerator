@@ -34,7 +34,6 @@ private:
     std::string line_;
     bool discardingLine_ = false;
     JsonObjectConst currentRequest_;  // valid only during a send()/sendError() call from within processLine()
-    bool pendingReboot_ = false;
     bool upgradeRequested_ = false;
     uint64_t nextOperationId_ = 1;
 };

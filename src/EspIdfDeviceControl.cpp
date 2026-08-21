@@ -9,6 +9,8 @@ uint32_t EspIdfDeviceControl::freeHeapBytes() const {
 }
 
 void EspIdfDeviceControl::reboot() {
+    Serial.flush();
+    delay(100);
     ESP.restart();
 }
 
