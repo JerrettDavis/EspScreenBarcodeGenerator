@@ -23,6 +23,10 @@ public:
     static void encode(const Response& response, JsonObjectConst request, JsonDocument& out);
     static void encodeError(const ProtocolError& error, JsonObjectConst request, JsonDocument& out);
 
+    // Writes the per-Response-variant fields into `body` without the v1 ok/cmd/id envelope
+    // wrapper, so other transports (e.g. SerialCobsEndpoint) can reuse the same field mapping.
+    static void encodeBody(const Response& response, JsonObject body);
+
 private:
     static bool parseSpec(JsonObjectConst request, const espbarcode::BarcodeSpec& base,
                           espbarcode::BarcodeSpec& spec, std::string& errorCode, std::string& errorMessage);

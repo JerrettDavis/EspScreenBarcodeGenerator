@@ -291,6 +291,93 @@ void JsonCommandCodec::addId(JsonDocument& out, JsonObjectConst request) {
     if (!id.isNull()) out["id"].set(id);
 }
 
+void JsonCommandCodec::encodeBody(const Response& response, JsonObject body) {
+    std::visit([&](auto&& value) {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, HelloResponse>) {
+            body["device"] = value.device;
+            body["protocol"] = value.protocol;
+            body["firmware"] = value.firmware;
+            body["transport"] = value.transport;
+            body["screen"]["width"] = value.screenWidth;
+            body["screen"]["height"] = value.screenHeight;
+        } else if constexpr (std::is_same_v<T, SimpleOkResponse>) {
+            if (value.message.has_value()) body["message"] = *value.message;
+        } else if constexpr (std::is_same_v<T, CapabilitiesResponse>) {
+            JsonArray symbologies = body["symbologies"].to<JsonArray>();
+            for (const auto& symbology : value.symbologies) symbologies.add(symbology);
+            JsonArray commands = body["commands"].to<JsonArray>();
+            for (const auto& command : value.commands) commands.add(command);
+            body["limits"]["payload_bytes"] = value.payloadBytes;
+            body["limits"]["serial_line_bytes"] = value.serialLineBytes;
+            body["limits"]["matrix_width"] = value.matrixWidth;
+            body["limits"]["matrix_height"] = value.matrixHeight;
+            body["upload"]["encoding"] = value.uploadEncoding;
+            body["upload"]["chunk_bytes_recommended"] = value.uploadChunkBytesRecommended;
+            body["raw_matrix"] = value.rawMatrix;
+            body["standalone_touch_ui"] = value.standaloneTouchUi;
+            body["persistent_presets"] = value.persistentPresets;
+        } else if constexpr (std::is_same_v<T, StatusResponse>) {
+            body["barcode_visible"] = value.barcodeVisible;
+            body["has_current"] = value.hasCurrent;
+            body["current_raw"] = value.currentRaw;
+            body["status"] = value.status;
+            body["free_heap"] = value.freeHeap;
+            if (value.current.has_value()) {
+                const auto& current = *value.current;
+                body["current"]["label"] = current.label;
+                body["current"]["width"] = current.width;
+                body["current"]["height"] = current.height;
+                body["current"]["linear"] = current.linear;
+                body["current"]["quiet"] = current.quiet;
+                body["current"]["rotation"] = current.rotation;
+                body["current"]["invert"] = current.invert;
+                body["current"]["bytes"] = current.bytes;
+            }
+        } else if constexpr (std::is_same_v<T, GenerateResponse>) {
+            body["type"] = value.type;
+            body["width"] = value.width;
+            body["height"] = value.height;
+            body["linear"] = value.linear;
+            body["quiet"] = value.quiet;
+            body["displayed"] = value.displayed;
+            body["normalized_data"] = value.normalizedData;
+        } else if constexpr (std::is_same_v<T, ListResponse>) {
+            JsonArray presets = body["presets"].to<JsonArray>();
+            for (const auto& name : value.presets) presets.add(name);
+        } else if constexpr (std::is_same_v<T, UploadBeginResponse>) {
+            body["bytes_expected"] = value.bytesExpected;
+            body["next_offset"] = value.nextOffset;
+        } else if constexpr (std::is_same_v<T, UploadChunkResponse>) {
+            body["accepted"] = value.accepted;
+            body["next_offset"] = value.nextOffset;
+        } else if constexpr (std::is_same_v<T, UploadEndResponse>) {
+            body["crc32"] = value.crc32;
+            body["displayed"] = value.displayed;
+        } else if constexpr (std::is_same_v<T, DownloadBeginEvent>) {
+            body["event"] = "download_begin";
+            body["width"] = value.width;
+            body["height"] = value.height;
+            body["linear"] = value.linear;
+            body["quiet"] = value.quiet;
+            body["rotation"] = value.rotation;
+            body["invert"] = value.invert;
+            body["label"] = value.label;
+            body["bytes"] = value.bytes;
+            body["encoding"] = value.encoding;
+            body["crc32"] = value.crc32;
+        } else if constexpr (std::is_same_v<T, DownloadChunkEvent>) {
+            body["event"] = "download_chunk";
+            body["offset"] = value.offset;
+            body["data"] = bytesToBase64(value.data);
+        } else if constexpr (std::is_same_v<T, DownloadEndEvent>) {
+            body["event"] = "download_end";
+            body["bytes"] = value.bytes;
+            body["crc32"] = value.crc32;
+        }
+    }, response);
+}
+
 void JsonCommandCodec::encode(const Response& response, JsonObjectConst request, JsonDocument& out) {
     addId(out, request);
     out["ok"] = true;
@@ -298,98 +385,28 @@ void JsonCommandCodec::encode(const Response& response, JsonObjectConst request,
         using T = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<T, HelloResponse>) {
             out["cmd"] = request["cmd"] | "hello";
-            out["device"] = value.device;
-            out["protocol"] = value.protocol;
-            out["firmware"] = value.firmware;
-            out["transport"] = value.transport;
-            out["screen"]["width"] = value.screenWidth;
-            out["screen"]["height"] = value.screenHeight;
         } else if constexpr (std::is_same_v<T, SimpleOkResponse>) {
             out["cmd"] = value.command;
-            if (value.message.has_value()) out["message"] = *value.message;
         } else if constexpr (std::is_same_v<T, CapabilitiesResponse>) {
             out["cmd"] = "capabilities";
-            JsonArray symbologies = out["symbologies"].to<JsonArray>();
-            for (const auto& symbology : value.symbologies) symbologies.add(symbology);
-            JsonArray commands = out["commands"].to<JsonArray>();
-            for (const auto& command : value.commands) commands.add(command);
-            out["limits"]["payload_bytes"] = value.payloadBytes;
-            out["limits"]["serial_line_bytes"] = value.serialLineBytes;
-            out["limits"]["matrix_width"] = value.matrixWidth;
-            out["limits"]["matrix_height"] = value.matrixHeight;
-            out["upload"]["encoding"] = value.uploadEncoding;
-            out["upload"]["chunk_bytes_recommended"] = value.uploadChunkBytesRecommended;
-            out["raw_matrix"] = value.rawMatrix;
-            out["standalone_touch_ui"] = value.standaloneTouchUi;
-            out["persistent_presets"] = value.persistentPresets;
         } else if constexpr (std::is_same_v<T, StatusResponse>) {
             out["cmd"] = "status";
-            out["barcode_visible"] = value.barcodeVisible;
-            out["has_current"] = value.hasCurrent;
-            out["current_raw"] = value.currentRaw;
-            out["status"] = value.status;
-            out["free_heap"] = value.freeHeap;
-            if (value.current.has_value()) {
-                const auto& current = *value.current;
-                out["current"]["label"] = current.label;
-                out["current"]["width"] = current.width;
-                out["current"]["height"] = current.height;
-                out["current"]["linear"] = current.linear;
-                out["current"]["quiet"] = current.quiet;
-                out["current"]["rotation"] = current.rotation;
-                out["current"]["invert"] = current.invert;
-                out["current"]["bytes"] = current.bytes;
-            }
         } else if constexpr (std::is_same_v<T, GenerateResponse>) {
             out["cmd"] = "generate";
-            out["type"] = value.type;
-            out["width"] = value.width;
-            out["height"] = value.height;
-            out["linear"] = value.linear;
-            out["quiet"] = value.quiet;
-            out["displayed"] = value.displayed;
-            out["normalized_data"] = value.normalizedData;
         } else if constexpr (std::is_same_v<T, ListResponse>) {
             out["cmd"] = "list";
-            JsonArray presets = out["presets"].to<JsonArray>();
-            for (const auto& name : value.presets) presets.add(name);
         } else if constexpr (std::is_same_v<T, UploadBeginResponse>) {
             out["cmd"] = "upload_begin";
-            out["bytes_expected"] = value.bytesExpected;
-            out["next_offset"] = value.nextOffset;
         } else if constexpr (std::is_same_v<T, UploadChunkResponse>) {
             out["cmd"] = "upload_chunk";
-            out["accepted"] = value.accepted;
-            out["next_offset"] = value.nextOffset;
         } else if constexpr (std::is_same_v<T, UploadEndResponse>) {
             out["cmd"] = "upload_end";
-            out["crc32"] = value.crc32;
-            out["displayed"] = value.displayed;
-        } else if constexpr (std::is_same_v<T, DownloadBeginEvent>) {
+        } else if constexpr (std::is_same_v<T, DownloadBeginEvent> || std::is_same_v<T, DownloadChunkEvent> ||
+                             std::is_same_v<T, DownloadEndEvent>) {
             out["cmd"] = "download";
-            out["event"] = "download_begin";
-            out["width"] = value.width;
-            out["height"] = value.height;
-            out["linear"] = value.linear;
-            out["quiet"] = value.quiet;
-            out["rotation"] = value.rotation;
-            out["invert"] = value.invert;
-            out["label"] = value.label;
-            out["bytes"] = value.bytes;
-            out["encoding"] = value.encoding;
-            out["crc32"] = value.crc32;
-        } else if constexpr (std::is_same_v<T, DownloadChunkEvent>) {
-            out["cmd"] = "download";
-            out["event"] = "download_chunk";
-            out["offset"] = value.offset;
-            out["data"] = bytesToBase64(value.data);
-        } else if constexpr (std::is_same_v<T, DownloadEndEvent>) {
-            out["cmd"] = "download";
-            out["event"] = "download_end";
-            out["bytes"] = value.bytes;
-            out["crc32"] = value.crc32;
         }
     }, response);
+    encodeBody(response, out.to<JsonObject>());
 }
 
 void JsonCommandCodec::encodeError(const ProtocolError& error, JsonObjectConst request, JsonDocument& out) {

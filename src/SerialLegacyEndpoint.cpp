@@ -90,6 +90,19 @@ void SerialLegacyEndpoint::processLine(const std::string& line) {
         return;
     }
 
+    if (commandName == "upgrade") {
+        JsonDocument response;
+        response["ok"] = true;
+        response["cmd"] = "upgrade";
+        response["message"] = "switching to EspLink v2 COBS framing";
+        if (request["id"] && !request["id"].isNull()) response["id"].set(request["id"]);
+        serializeJson(response, Serial);
+        Serial.write('\n');
+        Serial.flush();
+        upgradeRequested_ = true;
+        return;
+    }
+
     Command command;
     std::string errorCode, errorMessage;
     if (!JsonCommandCodec::decode(commandName, request, device_, command, errorCode, errorMessage)) {
