@@ -121,7 +121,7 @@ Fragmentation and reassembly are already wired: `esplink::FrameAssembler` (firmw
 | Profile | Raw frame ceiling | Framing | Reliability | Intended use |
 |---|---:|---|---|---|
 | `Unspecified` (0) | — | — | — | Default/unset value; never sent on the wire |
-| `EspNowV1` (1) | 250 | One raw frame per ESP-NOW datagram | App ACK/NACK | Compatibility (not implemented) |
+| `EspNowV1` (1) | 250 | One raw frame per ESP-NOW datagram | Fire-and-forget (no app ACK/NACK yet) | Compatibility — implemented (`src/EspNowEndpoint.cpp`), hw-validated radio bring-up only (see §10) |
 | `EspNowV2` (2) | 1,470 | One raw frame per ESP-NOW datagram | App ACK/NACK | Preferred ESP-NOW path (not implemented) |
 | `StreamSmall` (3) | 1,024 | COBS + `0x00` | Ordered reliable stream | Conservative RFCOMM/USB (not implemented) |
 | `StreamStandard` (4) | 4,096 | COBS + `0x00` | Ordered reliable stream | **Default and only profile this release's `SerialCobsEndpoint` negotiates** |
@@ -191,9 +191,17 @@ Implement `ILinkConnector`/`ILinkConnection` (.NET, WinRT RFCOMM) and a `Bluetoo
 
 Implement the same connector seam over a Windows-created group-owner TCP listener and an ESP32 Wi-Fi station endpoint. Reuse the `TcpStandard`/`TcpLarge` `CarrierProfileId` values already reserved in `lib/EspLinkCore/src/ConnectivityTypes.h` (§5) rather than adding new ones.
 
-### ESP-NOW USB gateway
+### ESP-NOW display endpoint (implemented, partially validated)
 
-A second PlatformIO project (gateway firmware) bridging a USB `SerialCobsEndpoint`-like link to native ESP-NOW. The gateway re-fragments opaque `MessageEnvelope` bytes across the USB↔ESP-NOW frame-ceiling gap using the same `FrameAssembler`/hop-frame `fragmentIndex`/`fragmentCount` fields, per the design plan's "a gateway may decode Layer 2, preserve Layer 3 bytes" rule (§8.4) — no new envelope format, and the gateway must not parse or translate barcode-domain JSON bodies merely to reframe them.
+`src/EspNowEndpoint.cpp` implements the `EspNowV1` compatibility profile on the display board itself: `IControlResponseSink` over native `esp_now`, reusing `ControlProtocolEngine`, `Envelope`, `HopFrame`, and `FrameAssembler` unchanged, plus a new portable helper (`lib/EspLinkCore/src/Fragmenter.h`, covered by `tests/esplink_fragmenter_tests.cpp`) that splits an outgoing envelope across as many 250-byte ESP-NOW datagrams as needed — the send-side counterpart to the fragmentation the extension guide (§8, point 3) already called for. It runs unconditionally alongside whichever serial transport is active (`main.cpp`'s `loop()` calls `espNowEndpoint.loop()` every iteration) since the ESP-NOW radio doesn't contend with UART.
+
+What's confirmed: the radio initializes on real hardware (`{"event":"espnow_ready","mac":"..."}` on boot, hw-validated on the esp32dev board) and the fragmentation/reassembly math is unit-tested. What's **not** yet validated: an actual two-peer ESP-NOW exchange over the air — this session had only one confirmed-flashable ESP32 board available (a second USB device present during development turned out to be running CircuitPython, not blank/flashable hardware, and was deliberately left untouched). A future session should pair this endpoint against a second real ESP32 board before treating the compatibility profile as hardware-proven end-to-end.
+
+Current scope cuts, matching the rest of this release: peer trust is a single hardcoded broadcast-address peer (no pairing, no encryption — design plan §7.7 trust/pairing remains entirely out of scope), and there is no application-level ACK/NACK or retry (the design plan's "App ACK/NACK" reliability requirement for this profile, §8.13, is not implemented — `onEspNowSent` is a no-op).
+
+### ESP-NOW USB gateway (still not implemented)
+
+A second PlatformIO project (gateway firmware) bridging a USB `SerialCobsEndpoint`-like link to native ESP-NOW, running on its own physical board. The gateway re-fragments opaque `MessageEnvelope` bytes across the USB↔ESP-NOW frame-ceiling gap using the same `FrameAssembler`/hop-frame `fragmentIndex`/`fragmentCount` fields, per the design plan's "a gateway may decode Layer 2, preserve Layer 3 bytes" rule (§8.4) — no new envelope format, and the gateway must not parse or translate barcode-domain JSON bodies merely to reframe them. The Windows-side ESP-NOW gateway connector (a new `ILinkConnector`/`ILinkConnection` pointed at the gateway's USB port) is a separate, later PR — until the gateway firmware exists, nothing on the .NET side needs to change.
 
 ### Known cleanup (not a "next PR" on its own, fold into whichever PR touches `SerialCobsEndpoint` next)
 
