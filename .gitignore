@@ -12,3 +12,6 @@ dotnet/**/bin/
 dotnet/**/obj/
 *.user
 .vs/
+
+# Isolated workspace for subagent-driven-development plan execution
+.worktrees/
