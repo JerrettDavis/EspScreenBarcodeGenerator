@@ -35,9 +35,22 @@ endfunction()
 
 espbarcode_enable_sanitizers(EspBarcodeCore)
 
-add_library(EspLinkCore INTERFACE)
-target_include_directories(EspLinkCore INTERFACE lib/EspLinkCore/src)
-target_link_libraries(EspLinkCore INTERFACE EspBarcodeCore)
+set(ESPLINKCORE_SOURCES
+    lib/EspLinkCore/src/Crc32.cpp
+    lib/EspLinkCore/src/Envelope.cpp
+    lib/EspLinkCore/src/HopFrame.cpp
+    lib/EspLinkCore/src/Cobs.cpp
+    lib/EspLinkCore/src/FrameAssembler.cpp
+)
+add_library(EspLinkCore STATIC ${ESPLINKCORE_SOURCES})
+target_include_directories(EspLinkCore PUBLIC lib/EspLinkCore/src)
+target_link_libraries(EspLinkCore PUBLIC EspBarcodeCore)
+if(MSVC)
+    target_compile_options(EspLinkCore PRIVATE /W4 /WX)
+else()
+    target_compile_options(EspLinkCore PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()
+espbarcode_enable_sanitizers(EspLinkCore)
 
 add_executable(native_core_tests tests/native_core_tests.cpp)
 target_link_libraries(native_core_tests PRIVATE EspBarcodeCore)
@@ -55,6 +68,10 @@ add_executable(esplink_golden_shape_tests tests/esplink_golden_shape_tests.cpp)
 target_link_libraries(esplink_golden_shape_tests PRIVATE EspLinkCore)
 espbarcode_enable_sanitizers(esplink_golden_shape_tests)
 
+add_executable(esplink_codec_tests tests/esplink_codec_tests.cpp)
+target_link_libraries(esplink_codec_tests PRIVATE EspLinkCore)
+espbarcode_enable_sanitizers(esplink_codec_tests)
+
 add_executable(barcode_native tools/native_cli.cpp)
 target_link_libraries(barcode_native PRIVATE EspBarcodeCore)
 espbarcode_enable_sanitizers(barcode_native)
@@ -65,4 +82,5 @@ if(BUILD_TESTING)
     add_test(NAME esplink_types_tests COMMAND esplink_types_tests)
     add_test(NAME esplink_selection_tests COMMAND esplink_selection_tests)
     add_test(NAME esplink_golden_shape_tests COMMAND esplink_golden_shape_tests)
+    add_test(NAME esplink_codec_tests COMMAND esplink_codec_tests)
 endif()
