@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>EspBarcode.Protocol</PackageId>
+    <Description>EspLink v2 message envelope, hop frame, COBS, CRC-32, and reassembly codec. Portable — no serial/WinRT dependency.</Description>
+  </PropertyGroup>
+
+</Project>
