@@ -12,10 +12,12 @@ dotnet/
     EspBarcode.Generator/    Host-side barcode generation/layout/PNG rendering library (no device needed)
     EspBarcode.Viewer.Cli/   Standalone generate/open/close CLI (file, OS image viewer, or the viewer window)
     EspBarcode.Viewer.Gui/   WPF viewer window + embedded Kestrel loopback server, launched/driven by EspBarcode.Viewer.Cli
+    EspBarcode.Controller.Web/  Blazor WebAssembly browser control panel — connects to ESP screens over the Web Serial API (see below)
   tests/
     EspBarcode.Client.Tests/      xUnit tests covering the protocol client and the PDF417 "license" scenario
     EspBarcode.Generator.Tests/   xUnit tests covering encoders, layout, and PNG rendering
     EspBarcode.Viewer.Cli.Tests/  xUnit tests covering CLI argument parsing and viewer IPC
+    EspBarcode.Controller.Web.E2ETests/  Reqnroll (Gherkin) + Playwright BDD suite driving the browser controller end to end
 ```
 
 ## Build & test
@@ -155,6 +157,51 @@ dotnet run --project src/EspBarcode.Viewer.Cli -- generate qr "LAB-TEST-001" --o
 
 (or `$env:ESP_BARCODE_VIEWER_EXE_PATH = "..."` once per shell session
 instead of repeating `--viewer-exe` on every command).
+
+## Browser control panel (`EspBarcode.Controller.Web`)
+
+A standalone Blazor WebAssembly app that connects to one or more ESP screens
+directly from the browser over the [Web Serial API](https://developer.mozilla.org/docs/Web/API/Web_Serial_API)
+— no native client, install, or driver beyond a Chromium-based browser
+(Chrome/Edge; Web Serial isn't implemented in Firefox/Safari). It speaks the
+same NDJSON v1 protocol as `EspBarcode.Client` (reimplemented on top of a
+JS-interop byte stream instead of `System.IO.Ports`, since WASM can't use
+that), plus the EspLink v2 subset a gateway-mode board relays
+(`system.hello`/`barcode.generate`) via the existing carrier-agnostic
+`EspBarcode.Protocol`/`EspBarcode.Connectivity` libraries.
+
+```powershell
+dotnet run --project src/EspBarcode.Controller.Web
+```
+
+Then open the printed `http://localhost:...` URL in Chrome or Edge. Pages:
+**Dashboard** (fleet overview), **Devices** (pair/monitor/reboot/orientation/
+gateway-mode entry), **Generator** (build a barcode, push to one or more
+devices, live preview downloaded from the device itself), **Library**
+(browser-local saved specs + each device's on-board LittleFS presets),
+**Gateway** (drive the EspLink v2 relay once a board is in gateway mode),
+**Automation** (Full Auto Mode: unattended reconnect/poll/playlist rotation),
+and **Settings** (light/dark theme — same palette as `lib/UiGeometry/src/Theme.h`,
+so the browser app and the physical screens match).
+
+### E2E tests (`EspBarcode.Controller.Web.E2ETests`)
+
+```powershell
+dotnet test tests/EspBarcode.Controller.Web.E2ETests
+```
+
+Gherkin features under `Features/` (device connection, generation, storage,
+gateway relay, Full Auto Mode, theme) run via Reqnroll + Playwright against a
+real dev-server instance and a real headless Chromium. Since Web Serial
+requires a live physical device picker no automation can click through, the
+suite injects `wwwroot/js/fakeSerial.js` — a software ESP emulator (NDJSON v1
+**and** a byte-accurate EspLink v2 COBS/hop-frame/envelope implementation) as
+`window.__espFakeSerial` before the app boots, so the whole stack, gateway
+relay included, gets deterministic, hardware-free coverage. A real two-board
+hardware pass still needs a human to complete the one-time browser device
+picker (Web Serial's security model has no programmatic bypass); everything
+else — protocol framing, generation, presets, automation — was exercised
+against real ESP32 boards for this feature's hardware validation.
 
 ## Library usage
 

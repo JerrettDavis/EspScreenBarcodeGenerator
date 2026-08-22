@@ -1,0 +1,47 @@
+@page "/settings"
+@implements IDisposable
+@inject ThemeService Theme
+@inject DeviceRegistry Devices
+
+<PageTitle>Settings - ESP Barcode Control</PageTitle>
+
+<h1 style="margin-top:0;">Settings</h1>
+
+<div class="esb-card">
+    <h2>Appearance</h2>
+    <p class="esb-muted">Matches the on-device light/dark theme exactly (same palette as the touchscreen UI).</p>
+    <div class="esb-btn-row">
+        <button class="esb-btn @(Theme.Current == AppTheme.Dark ? "esb-btn-primary" : "")" type="button"
+                data-testid="theme-dark" @onclick="@(() => Theme.SetAsync(AppTheme.Dark))">🌙 Dark</button>
+        <button class="esb-btn @(Theme.Current == AppTheme.Light ? "esb-btn-primary" : "")" type="button"
+                data-testid="theme-light" @onclick="@(() => Theme.SetAsync(AppTheme.Light))">☀️ Light</button>
+    </div>
+</div>
+
+<div class="esb-card">
+    <h2>About</h2>
+    <table class="esb-table">
+        <tbody>
+        <tr><td>Transport</td><td>Web Serial API, 115200 baud (matches <code>docs/PROTOCOL.md</code>)</td></tr>
+        <tr><td>Control protocols</td><td>NDJSON v1 (full command set) + EspLink v2 over gateway relay (<code>system.hello</code>, <code>barcode.generate</code>)</td></tr>
+        <tr><td>Browser support</td><td>Chromium-based browsers only (Chrome, Edge) — Web Serial is not implemented in Firefox/Safari</td></tr>
+        <tr><td>Connected devices</td><td>@Devices.Devices.Count</td></tr>
+        </tbody>
+    </table>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Theme.Changed += OnChanged;
+        Devices.Changed += OnChanged;
+    }
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Theme.Changed -= OnChanged;
+        Devices.Changed -= OnChanged;
+    }
+}

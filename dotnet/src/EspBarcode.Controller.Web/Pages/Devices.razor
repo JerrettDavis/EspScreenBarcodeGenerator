@@ -1,0 +1,230 @@
+@page "/devices"
+@implements IDisposable
+@inject DeviceRegistry Registry
+
+<PageTitle>Devices - ESP Barcode Control</PageTitle>
+
+<h1 style="margin-top:0;">Devices</h1>
+
+@if (_error is not null)
+{
+    <div class="esb-alert esb-alert-error" data-testid="devices-error">@_error</div>
+}
+
+<div class="esb-card">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+        <p class="esb-muted" style="margin:0;">
+            Connects over the <a href="https://developer.mozilla.org/docs/Web/API/Web_Serial_API" target="_blank" rel="noreferrer">Web Serial API</a>
+            at 115200 baud, matching the firmware's USB protocol.
+        </p>
+        <div class="esb-btn-row">
+            <button class="esb-btn esb-btn-sm" type="button" @onclick="ReconnectAuthorizedAsync" disabled="@_busy" data-testid="reconnect-authorized">
+                Reconnect Known Devices
+            </button>
+            <button class="esb-btn esb-btn-primary" type="button" @onclick="ConnectNewAsync" disabled="@_busy" data-testid="connect-new-device">
+                + Connect Device
+            </button>
+        </div>
+    </div>
+</div>
+
+@if (Registry.Devices.Count == 0)
+{
+    <div class="esb-empty" data-testid="devices-empty">No devices connected. Click "Connect Device" and pick an ESP screen's serial port.</div>
+}
+else
+{
+    <div class="esb-grid" data-testid="device-list">
+        @foreach (var device in Registry.Devices)
+        {
+            <div class="esb-card" data-testid="device-card" data-device-id="@device.Id">
+                <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
+                    <div style="flex:1; min-width:0;">
+                        <input class="esb-input" style="font-weight:700; margin-bottom:6px;" value="@device.Nickname"
+                               @onchange="@(e => device.Nickname = e.Value?.ToString() ?? device.Nickname)" data-testid="device-nickname" />
+                        <div class="esb-faint">Port @device.PortId</div>
+                    </div>
+                    @if (!device.IsConnected)
+                    {
+                        <span class="esb-badge esb-badge-error">Disconnected</span>
+                    }
+                    else if (device.Mode == DeviceMode.GatewayRelay)
+                    {
+                        <span class="esb-badge esb-badge-warn">Gateway relay</span>
+                    }
+                    else
+                    {
+                        <span class="esb-badge esb-badge-ok">Client</span>
+                    }
+                </div>
+
+                @if (device.LastHello is { } hello)
+                {
+                    <p class="esb-muted" style="margin:10px 0;">
+                        @hello.Device · firmware @hello.Firmware · @hello.ScreenWidth×@hello.ScreenHeight
+                    </p>
+                }
+                @if (device.LastStatus is { } status)
+                {
+                    <p class="esb-faint" style="margin:0 0 10px;">
+                        @status.Status · free heap @status.FreeHeap bytes
+                    </p>
+                }
+                @if (device.LastError is not null)
+                {
+                    <p class="esb-faint" style="color:var(--esb-danger);">@device.LastError</p>
+                }
+
+                <div class="esb-btn-row">
+                    <button class="esb-btn esb-btn-sm" type="button" disabled="@(!device.IsConnected || _busy)"
+                            @onclick="@(() => RefreshAsync(device))">Refresh</button>
+                    <button class="esb-btn esb-btn-sm" type="button" disabled="@(!device.IsConnected || _busy)"
+                            @onclick="@(() => ToggleBacklightAsync(device))">Backlight</button>
+                    <button class="esb-btn esb-btn-sm" type="button" disabled="@(!device.IsConnected || _busy)"
+                            @onclick="@(() => RebootAsync(device))">Reboot</button>
+                    @if (device.Mode == DeviceMode.Client)
+                    {
+                        <button class="esb-btn esb-btn-sm" type="button" disabled="@(!device.IsConnected || _busy)"
+                                @onclick="@(() => EnterGatewayModeAsync(device))" data-testid="enter-gateway">
+                            Enter Gateway Mode
+                        </button>
+                    }
+                    <button class="esb-btn esb-btn-sm esb-btn-danger" type="button" disabled="@_busy"
+                            @onclick="@(() => DisconnectAsync(device))">Disconnect</button>
+                    <button class="esb-btn esb-btn-sm esb-btn-danger" type="button" disabled="@_busy"
+                            @onclick="@(() => ForgetAsync(device))">Forget</button>
+                </div>
+
+                @if (device.Mode == DeviceMode.Client)
+                {
+                    <div class="esb-form-row" style="margin-top:12px;">
+                        <div class="esb-field">
+                            <label>Barcode Orientation</label>
+                            <select class="esb-select" disabled="@(!device.IsConnected || _busy)"
+                                    @onchange="@(e => SetOrientationAsync(device, "barcode", int.Parse(e.Value!.ToString()!)))">
+                                <option value="0">0°</option>
+                                <option value="1" selected>90°</option>
+                                <option value="2">180°</option>
+                                <option value="3">270°</option>
+                            </select>
+                        </div>
+                        <div class="esb-field">
+                            <label>Editor Orientation</label>
+                            <select class="esb-select" disabled="@(!device.IsConnected || _busy)"
+                                    @onchange="@(e => SetOrientationAsync(device, "editor", int.Parse(e.Value!.ToString()!)))">
+                                <option value="0">0°</option>
+                                <option value="1" selected>90°</option>
+                                <option value="2">180°</option>
+                                <option value="3">270°</option>
+                            </select>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _busy;
+    private string? _error;
+
+    protected override void OnInitialized() => Registry.Changed += OnChanged;
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private async Task ConnectNewAsync()
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await Registry.ConnectNewAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not connect: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ReconnectAuthorizedAsync()
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await Registry.ReconnectAuthorizedAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not reconnect: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RefreshAsync(DeviceConnection device)
+    {
+        _busy = true;
+        try { await device.RefreshAsync(); }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleBacklightAsync(DeviceConnection device)
+    {
+        _busy = true;
+        try
+        {
+            var status = await device.Client.StatusAsync();
+            await device.Client.BacklightAsync(!status.BarcodeVisible);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RebootAsync(DeviceConnection device)
+    {
+        _busy = true;
+        try { await device.Client.RebootAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SetOrientationAsync(DeviceConnection device, string target, int value)
+    {
+        _busy = true;
+        try { await device.Client.SetOrientationAsync(target, value); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task EnterGatewayModeAsync(DeviceConnection device)
+    {
+        _busy = true;
+        try { await device.EnterGatewayModeAsync(); }
+        catch (Exception ex) { _error = $"Gateway handshake failed: {ex.Message}"; }
+        finally { _busy = false; }
+    }
+
+    private async Task DisconnectAsync(DeviceConnection device)
+    {
+        _busy = true;
+        try { await Registry.DisconnectAsync(device); }
+        finally { _busy = false; }
+    }
+
+    private async Task ForgetAsync(DeviceConnection device)
+    {
+        _busy = true;
+        try { await Registry.ForgetAsync(device); }
+        finally { _busy = false; }
+    }
+
+    public void Dispose() => Registry.Changed -= OnChanged;
+}

@@ -1,0 +1,221 @@
+@page "/generator"
+@implements IDisposable
+@inject DeviceRegistry Devices
+@inject BarcodeLibraryService Library
+@inject BarcodeCanvasRenderer Renderer
+
+<PageTitle>Generator - ESP Barcode Control</PageTitle>
+
+<h1 style="margin-top:0;">Generator</h1>
+
+<div style="display:grid; grid-template-columns: minmax(320px, 1fr) 320px; gap:20px; align-items:start;">
+    <div class="esb-card">
+        <h2>Barcode Spec</h2>
+
+        <div class="esb-form-row">
+            <div class="esb-field">
+                <label for="gen-type">Type</label>
+                <select id="gen-type" class="esb-select" data-testid="generator-type" @bind="_options.Type">
+                    @foreach (var kind in BarcodeKindExtensions.All)
+                    {
+                        <option value="@kind">@kind.DisplayName()</option>
+                    }
+                </select>
+            </div>
+            <div class="esb-field">
+                <label for="gen-rotation">Rotation</label>
+                <select id="gen-rotation" class="esb-select" @bind="_options.Rotation">
+                    <option value="auto">Auto</option>
+                    <option value="0">0°</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="esb-field">
+            <label for="gen-data">Data</label>
+            <input id="gen-data" class="esb-input" data-testid="generator-data" @bind="_options.Data" @bind:event="oninput" placeholder="LAB-TEST-001" />
+        </div>
+
+        <div class="esb-form-row">
+            <div class="esb-field">
+                <label for="gen-ecc">QR ECC</label>
+                <select id="gen-ecc" class="esb-select" @bind="_options.Ecc">
+                    <option value="L">L</option>
+                    <option value="M">M</option>
+                    <option value="Q">Q</option>
+                    <option value="H">H</option>
+                </select>
+            </div>
+            <div class="esb-field">
+                <label for="gen-quiet">Quiet Zone</label>
+                <input id="gen-quiet" type="number" class="esb-input" @bind="_options.Quiet" />
+            </div>
+            <div class="esb-field">
+                <label for="gen-minmodule">Min Module (px)</label>
+                <input id="gen-minmodule" type="number" min="1" max="8" class="esb-input" @bind="_options.MinModule" />
+            </div>
+        </div>
+
+        <div class="esb-form-row">
+            <label class="esb-checkbox"><input type="checkbox" @bind="_options.Rectangular" /> Rectangular</label>
+            <label class="esb-checkbox"><input type="checkbox" @bind="_options.Invert" /> Invert</label>
+            <label class="esb-checkbox"><input type="checkbox" @bind="_options.Checksum" /> Checksum (MSI)</label>
+            <label class="esb-checkbox"><input type="checkbox" @bind="_options.Display" /> Display immediately</label>
+        </div>
+
+        @if (_options.Type == BarcodeKind.Qr)
+        {
+            <div class="esb-form-row">
+                <div class="esb-field"><label>QR Min Version</label><input type="number" class="esb-input" @bind="_options.QrMinVersion" /></div>
+                <div class="esb-field"><label>QR Max Version</label><input type="number" class="esb-input" @bind="_options.QrMaxVersion" /></div>
+            </div>
+        }
+        @if (_options.Type == BarcodeKind.Aztec)
+        {
+            <div class="esb-form-row">
+                <div class="esb-field"><label>Aztec Security %</label><input type="number" class="esb-input" @bind="_options.AztecSecurity" /></div>
+                <div class="esb-field"><label>Aztec Layers</label><input type="number" class="esb-input" @bind="_options.AztecLayers" /></div>
+            </div>
+        }
+
+        <div class="esb-field">
+            <label for="gen-saveas">Save on device as preset (optional)</label>
+            <input id="gen-saveas" class="esb-input" data-testid="generator-saveas" @bind="_saveAsName" placeholder="LOT_SAMPLE" />
+        </div>
+
+        <h3>Target Devices</h3>
+        @if (ClientDevices.Count == 0)
+        {
+            <p class="esb-muted">No client-mode devices connected. Go to <a href="devices">Devices</a> first.</p>
+        }
+        else
+        {
+            @foreach (var device in ClientDevices)
+            {
+                <label class="esb-checkbox" style="margin-bottom:6px;">
+                    <input type="checkbox" data-testid="generator-target-checkbox" checked="@_targets.Contains(device.Id)"
+                           @onchange="@(e => ToggleTarget(device.Id, (bool)e.Value!))" />
+                    @device.Nickname
+                </label>
+            }
+        }
+
+        <div class="esb-btn-row" style="margin-top:16px;">
+            <button class="esb-btn esb-btn-primary" type="button" data-testid="generate-and-push"
+                    disabled="@(_busy || _targets.Count == 0 || string.IsNullOrWhiteSpace(_options.Data))"
+                    @onclick="GenerateAndPushAsync">
+                Generate &amp; Push
+            </button>
+            <button class="esb-btn" type="button" data-testid="save-to-library"
+                    disabled="@(string.IsNullOrWhiteSpace(_options.Data))" @onclick="SaveToLibraryAsync">
+                Save to Library
+            </button>
+        </div>
+
+        @if (_message is not null)
+        {
+            <div class="esb-alert @(_isError ? "esb-alert-error" : "esb-alert-info")" data-testid="generator-message" style="margin-top:14px;">@_message</div>
+        }
+    </div>
+
+    <div class="esb-card">
+        <h2>Preview</h2>
+        <p class="esb-faint">Downloaded live from the first target device after generating — pixel-accurate to the panel.</p>
+        <div class="esb-preview">
+            <canvas id="generator-preview-canvas" width="240" height="240" data-testid="generator-preview"></canvas>
+        </div>
+        @if (_lastResult is not null)
+        {
+            <p class="esb-muted" style="margin-top:10px;">
+                @_lastResult.Width×@_lastResult.Height modules · normalized "@_lastResult.NormalizedData"
+            </p>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly GenerateOptions _options = new();
+    private readonly HashSet<string> _targets = [];
+    private string? _saveAsName;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private GenerateResult? _lastResult;
+
+    private List<DeviceConnection> ClientDevices =>
+        Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.Client).ToList();
+
+    protected override void OnInitialized() => Devices.Changed += OnChanged;
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private void ToggleTarget(string id, bool selected)
+    {
+        if (selected) _targets.Add(id);
+        else _targets.Remove(id);
+    }
+
+    private async Task GenerateAndPushAsync()
+    {
+        _busy = true;
+        _message = null;
+        _isError = false;
+        var options = _options.Clone();
+        options.SaveAs = string.IsNullOrWhiteSpace(_saveAsName) ? null : _saveAsName;
+
+        var succeeded = 0;
+        var failures = new List<string>();
+        DeviceConnection? firstOk = null;
+
+        foreach (var device in Devices.Devices.Where(d => _targets.Contains(d.Id)))
+        {
+            try
+            {
+                _lastResult = await device.Client.GenerateAsync(options);
+                succeeded++;
+                firstOk ??= device;
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{device.Nickname}: {ex.Message}");
+            }
+        }
+
+        _message = failures.Count == 0
+            ? $"Generated and pushed to {succeeded} device(s)."
+            : $"Generated on {succeeded} device(s); failed on {string.Join("; ", failures)}";
+        _isError = failures.Count > 0 && succeeded == 0;
+
+        if (firstOk is not null && options.Display)
+        {
+            try
+            {
+                var matrix = await firstOk.Client.DownloadCurrentMatrixAsync();
+                await Renderer.RenderAsync("generator-preview-canvas", matrix);
+            }
+            catch
+            {
+                // Preview is best-effort; the push itself already succeeded/failed above.
+            }
+        }
+
+        _busy = false;
+    }
+
+    private async Task SaveToLibraryAsync()
+    {
+        var item = new LibraryItem
+        {
+            Name = string.IsNullOrWhiteSpace(_saveAsName) ? $"{_options.Type.DisplayName()} - {_options.Data}" : _saveAsName!,
+            Options = _options.Clone(),
+        };
+        await Library.SaveAsync(item);
+        _message = $"Saved '{item.Name}' to the library.";
+        _isError = false;
+    }
+
+    public void Dispose() => Devices.Changed -= OnChanged;
+}

@@ -1,0 +1,208 @@
+@page "/library"
+@implements IDisposable
+@inject BarcodeLibraryService LibraryService
+@inject DeviceRegistry Devices
+
+<PageTitle>Library - ESP Barcode Control</PageTitle>
+
+<h1 style="margin-top:0;">Storage</h1>
+
+<div class="esb-card">
+    <h2>Local Library</h2>
+    <p class="esb-muted">Barcode specs saved in this browser (localStorage) — independent of any device's own on-board presets.</p>
+
+    @if (_items.Count == 0)
+    {
+        <div class="esb-empty">Nothing saved yet. Generate a barcode and click "Save to Library".</div>
+    }
+    else
+    {
+        <table class="esb-table" data-testid="library-table">
+            <thead><tr><th>Name</th><th>Type</th><th>Data</th><th>Saved</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var item in _items)
+            {
+                <tr data-testid="library-row">
+                    <td>@item.Name</td>
+                    <td>@item.Options.Type.DisplayName()</td>
+                    <td class="esb-faint">@item.Options.Data</td>
+                    <td class="esb-faint">@item.CreatedAt.ToLocalTime().ToString("g")</td>
+                    <td>
+                        <div class="esb-btn-row">
+                            <select class="esb-select esb-btn-sm" value="@GetPushTarget(item.Id)"
+                                    @onchange="@(e => SetPushTarget(item.Id, e.Value?.ToString() ?? ""))">
+                                <option value="">Push to…</option>
+                                @foreach (var device in ClientDevices)
+                                {
+                                    <option value="@device.Id">@device.Nickname</option>
+                                }
+                            </select>
+                            <button class="esb-btn esb-btn-sm" type="button" @onclick="@(() => PushAsync(item))">Push</button>
+                            <button class="esb-btn esb-btn-sm esb-btn-danger" type="button" data-testid="library-delete"
+                                    @onclick="@(() => DeleteAsync(item))">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</div>
+
+<div class="esb-card">
+    <h2>On-Device Presets</h2>
+    <p class="esb-muted">Presets saved to a device's own LittleFS storage (survive across sessions on that board).</p>
+
+    <div class="esb-field" style="max-width:280px;">
+        <label>Device</label>
+        <select class="esb-select" data-testid="preset-device-select" @bind="_selectedDeviceId" @bind:after="RefreshPresetsAsync">
+            <option value="">Select a device…</option>
+            @foreach (var device in ClientDevices)
+            {
+                <option value="@device.Id">@device.Nickname</option>
+            }
+        </select>
+    </div>
+
+    @if (SelectedDevice is not null)
+    {
+        @if (_presets.Count == 0)
+        {
+            <div class="esb-empty">No presets saved on this device.</div>
+        }
+        else
+        {
+            <table class="esb-table" data-testid="preset-table">
+                <thead><tr><th>Name</th><th></th></tr></thead>
+                <tbody>
+                @foreach (var name in _presets)
+                {
+                    <tr data-testid="preset-row">
+                        <td>@name</td>
+                        <td>
+                            <div class="esb-btn-row">
+                                <button class="esb-btn esb-btn-sm" type="button" @onclick="@(() => LoadPresetAsync(name))">Display</button>
+                                <button class="esb-btn esb-btn-sm esb-btn-danger" type="button" @onclick="@(() => DeletePresetAsync(name))">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+
+        <div class="esb-form-row" style="margin-top:14px; max-width:400px;">
+            <div class="esb-field">
+                <label>Save currently displayed symbol as</label>
+                <input class="esb-input" data-testid="preset-save-name" @bind="_newPresetName" placeholder="LOT_SAMPLE" />
+            </div>
+            <button class="esb-btn" type="button" style="align-self:end;" data-testid="preset-save-button" @onclick="SaveCurrentAsPresetAsync">Save</button>
+        </div>
+    }
+
+    @if (_deviceMessage is not null)
+    {
+        <div class="esb-alert @(_deviceError ? "esb-alert-error" : "esb-alert-info")">@_deviceMessage</div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<LibraryItem> _items = [];
+    private readonly Dictionary<string, string> _pushTarget = new();
+    private string _selectedDeviceId = "";
+    private IReadOnlyList<string> _presets = [];
+    private string? _newPresetName;
+    private string? _deviceMessage;
+    private bool _deviceError;
+
+    private List<DeviceConnection> ClientDevices =>
+        Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.Client).ToList();
+
+    private DeviceConnection? SelectedDevice => ClientDevices.FirstOrDefault(d => d.Id == _selectedDeviceId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        LibraryService.Changed += OnChanged;
+        Devices.Changed += OnChanged;
+        await ReloadAsync();
+    }
+
+    private async void OnChanged() => await InvokeAsync(async () => { await ReloadAsync(); StateHasChanged(); });
+
+    private async Task ReloadAsync() => _items = await LibraryService.GetAllAsync();
+
+    private string GetPushTarget(string itemId) => _pushTarget.GetValueOrDefault(itemId, "");
+
+    private void SetPushTarget(string itemId, string deviceId) => _pushTarget[itemId] = deviceId;
+
+    private async Task PushAsync(LibraryItem item)
+    {
+        if (!_pushTarget.TryGetValue(item.Id, out var targetId) || string.IsNullOrEmpty(targetId)) return;
+        var device = Devices.Devices.FirstOrDefault(d => d.Id == targetId);
+        if (device is null) return;
+        try
+        {
+            await device.Client.GenerateAsync(item.Options);
+        }
+        catch (Exception ex)
+        {
+            _deviceMessage = $"Push failed: {ex.Message}";
+            _deviceError = true;
+        }
+    }
+
+    private async Task DeleteAsync(LibraryItem item) => await LibraryService.DeleteAsync(item.Id);
+
+    private async Task RefreshPresetsAsync()
+    {
+        _deviceMessage = null;
+        if (SelectedDevice is null) { _presets = []; return; }
+        try
+        {
+            _presets = await SelectedDevice.Client.ListPresetsAsync();
+        }
+        catch (Exception ex)
+        {
+            _deviceMessage = $"Could not list presets: {ex.Message}";
+            _deviceError = true;
+        }
+    }
+
+    private async Task LoadPresetAsync(string name)
+    {
+        if (SelectedDevice is null) return;
+        try { await SelectedDevice.Client.LoadAsync(name, display: true); }
+        catch (Exception ex) { _deviceMessage = ex.Message; _deviceError = true; }
+    }
+
+    private async Task DeletePresetAsync(string name)
+    {
+        if (SelectedDevice is null) return;
+        try
+        {
+            await SelectedDevice.Client.DeleteAsync(name);
+            await RefreshPresetsAsync();
+        }
+        catch (Exception ex) { _deviceMessage = ex.Message; _deviceError = true; }
+    }
+
+    private async Task SaveCurrentAsPresetAsync()
+    {
+        if (SelectedDevice is null || string.IsNullOrWhiteSpace(_newPresetName)) return;
+        try
+        {
+            await SelectedDevice.Client.SaveAsync(_newPresetName);
+            _newPresetName = null;
+            _deviceMessage = "Saved.";
+            _deviceError = false;
+            await RefreshPresetsAsync();
+        }
+        catch (Exception ex) { _deviceMessage = ex.Message; _deviceError = true; }
+    }
+
+    public void Dispose()
+    {
+        LibraryService.Changed -= OnChanged;
+        Devices.Changed -= OnChanged;
+    }
+}

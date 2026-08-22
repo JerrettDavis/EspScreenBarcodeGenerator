@@ -1,0 +1,97 @@
+@page "/"
+@implements IDisposable
+@inject DeviceRegistry Devices
+@inject AutomationService Automation
+
+<PageTitle>Dashboard - ESP Barcode Control</PageTitle>
+
+<h1 style="margin-top:0;">Dashboard</h1>
+
+<div class="esb-grid" style="margin-bottom:20px;">
+    <div class="esb-stat">
+        <div class="esb-stat-label">Connected Devices</div>
+        <div class="esb-stat-value">@Devices.Devices.Count(d => d.IsConnected)</div>
+    </div>
+    <div class="esb-stat">
+        <div class="esb-stat-label">Gateway-Mode Boards</div>
+        <div class="esb-stat-value">@Devices.Devices.Count(d => d.Mode == DeviceMode.GatewayRelay)</div>
+    </div>
+    <div class="esb-stat">
+        <div class="esb-stat-label">Full Auto Mode</div>
+        <div class="esb-stat-value">@(Automation.Settings.Enabled ? "On" : "Off")</div>
+    </div>
+    <div class="esb-stat">
+        <div class="esb-stat-label">Devices With Errors</div>
+        <div class="esb-stat-value">@Devices.Devices.Count(d => d.LastError is not null)</div>
+    </div>
+</div>
+
+@if (Automation.Settings.Enabled && Automation.LastActionSummary is not null)
+{
+    <div class="esb-alert esb-alert-info">@Automation.LastActionSummary</div>
+}
+
+<div class="esb-card">
+    <h2>Devices</h2>
+    @if (Devices.Devices.Count == 0)
+    {
+        <div class="esb-empty">
+            No devices connected yet. Head to <a href="devices">Devices</a> to pair an ESP screen over Web Serial.
+        </div>
+    }
+    else
+    {
+        <table class="esb-table">
+            <thead>
+            <tr>
+                <th>Nickname</th>
+                <th>Mode</th>
+                <th>Firmware</th>
+                <th>Status</th>
+                <th>Last Seen</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var device in Devices.Devices)
+            {
+                <tr>
+                    <td>@device.Nickname</td>
+                    <td>@(device.Mode == DeviceMode.GatewayRelay ? "Gateway relay" : "Client")</td>
+                    <td>@(device.LastHello?.Firmware ?? "-")</td>
+                    <td>
+                        @if (!device.IsConnected)
+                        {
+                            <span class="esb-badge esb-badge-error">Disconnected</span>
+                        }
+                        else if (device.LastError is not null)
+                        {
+                            <span class="esb-badge esb-badge-error" title="@device.LastError">Error</span>
+                        }
+                        else
+                        {
+                            <span class="esb-badge esb-badge-ok">@(device.LastStatus?.Status ?? "Online")</span>
+                        }
+                    </td>
+                    <td class="esb-faint">@(device.LastSeenUtc is { } seen ? seen.ToLocalTime().ToString("T") : "-")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Devices.Changed += OnChanged;
+        Automation.Changed += OnChanged;
+    }
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Devices.Changed -= OnChanged;
+        Automation.Changed -= OnChanged;
+    }
+}

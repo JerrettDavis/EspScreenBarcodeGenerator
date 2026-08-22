@@ -1,0 +1,140 @@
+@page "/gateway"
+@implements IDisposable
+@inject DeviceRegistry Devices
+
+<PageTitle>Gateway - ESP Barcode Control</PageTitle>
+
+<h1 style="margin-top:0;">Gateway</h1>
+
+<div class="esb-card">
+    <p class="esb-muted" style="margin:0;">
+        A gateway board relays EspLink v2 traffic between this browser (over USB) and a second,
+        ESP-NOW-connected display — the same path validated in
+        <code>docs/PROTOCOL_V2.md</code>'s two-board hardware test. Only <code>system.hello</code> and
+        <code>barcode.generate</code> are supported over the relay this firmware release. Put a board into
+        gateway mode from the <a href="devices">Devices</a> page first — it's a one-way switch until reboot.
+    </p>
+</div>
+
+@if (GatewayDevices.Count == 0)
+{
+    <div class="esb-empty">No boards are in gateway mode yet.</div>
+}
+else
+{
+    @foreach (var device in GatewayDevices)
+    {
+        <div class="esb-card" data-testid="gateway-card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2 style="margin:0;">@device.Nickname</h2>
+                <span class="esb-badge esb-badge-warn">control session #@device.GatewayControlSessionId</span>
+            </div>
+
+            <div class="esb-btn-row" style="margin:12px 0;">
+                <button class="esb-btn esb-btn-sm" type="button" disabled="@_busy" @onclick="@(() => SayHelloAsync(device))">
+                    Re-negotiate (system.hello)
+                </button>
+            </div>
+
+            <div class="esb-form-row">
+                <div class="esb-field">
+                    <label>Type</label>
+                    <select class="esb-select" value="@GetSelectedType(device.Id)"
+                            @onchange="@(e => SetSelectedType(device.Id, Enum.Parse<BarcodeKind>(e.Value!.ToString()!)))">
+                        @foreach (var kind in BarcodeKindExtensions.All)
+                        {
+                            <option value="@kind">@kind.DisplayName()</option>
+                        }
+                    </select>
+                </div>
+                <div class="esb-field">
+                    <label>Data</label>
+                    <input class="esb-input" data-testid="gateway-data" value="@GetData(device.Id)"
+                           @oninput="@(e => SetData(device.Id, e.Value?.ToString() ?? ""))" />
+                </div>
+            </div>
+            <button class="esb-btn esb-btn-primary" type="button" disabled="@_busy" data-testid="gateway-generate"
+                    @onclick="@(() => GenerateAsync(device))">
+                Generate via Relay
+            </button>
+
+            @if (_results.TryGetValue(device.Id, out var result))
+            {
+                <div class="esb-alert esb-alert-info" style="margin-top:12px;">
+                    Relayed: @result.Width×@result.Height modules, displayed=@result.Displayed
+                </div>
+            }
+            @if (_errors.TryGetValue(device.Id, out var error))
+            {
+                <div class="esb-alert esb-alert-error" style="margin-top:12px;">@error</div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private bool _busy;
+    private readonly Dictionary<string, BarcodeKind> _type = new();
+    private readonly Dictionary<string, string> _data = new();
+    private readonly Dictionary<string, GenerateResult> _results = new();
+    private readonly Dictionary<string, string> _errors = new();
+
+    private List<DeviceConnection> GatewayDevices =>
+        Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay).ToList();
+
+    protected override void OnInitialized() => Devices.Changed += OnChanged;
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private string GetData(string deviceId) => _data.GetValueOrDefault(deviceId, "LAB-TEST-001");
+    private void SetData(string deviceId, string value) => _data[deviceId] = value;
+
+    private BarcodeKind GetSelectedType(string deviceId) => _type.GetValueOrDefault(deviceId, BarcodeKind.Qr);
+    private void SetSelectedType(string deviceId, BarcodeKind kind) => _type[deviceId] = kind;
+
+    private async Task SayHelloAsync(DeviceConnection device)
+    {
+        if (device.GatewayLink is null) return;
+        _busy = true;
+        _errors.Remove(device.Id);
+        try
+        {
+            await device.GatewayLink.HelloAsync();
+        }
+        catch (Exception ex)
+        {
+            _errors[device.Id] = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task GenerateAsync(DeviceConnection device)
+    {
+        if (device.GatewayLink is null) return;
+        _busy = true;
+        _errors.Remove(device.Id);
+        var options = new GenerateOptions
+        {
+            Type = _type.GetValueOrDefault(device.Id, BarcodeKind.Qr),
+            Data = GetData(device.Id),
+            Display = true,
+        };
+        try
+        {
+            _results[device.Id] = await device.GatewayLink.GenerateAsync(options, device.GatewayControlSessionId);
+        }
+        catch (Exception ex)
+        {
+            _errors[device.Id] = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose() => Devices.Changed -= OnChanged;
+}

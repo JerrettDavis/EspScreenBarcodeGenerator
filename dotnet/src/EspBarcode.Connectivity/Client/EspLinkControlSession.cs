@@ -17,10 +17,19 @@ public sealed class EspLinkControlSession : IAsyncDisposable
     {
         _receiveLoop = Task.Run(async () =>
         {
-            await foreach (var message in _linkSession.ReceiveMessagesAsync(_cts.Token))
+            try
             {
-                if (!MessageEnvelope.TryDecode(message, out var envelope, out var body, out _)) continue;
-                if (_pending.TryRemove(envelope.CorrelationId, out var tcs)) tcs.TrySetResult((envelope, body));
+                await foreach (var message in _linkSession.ReceiveMessagesAsync(_cts.Token))
+                {
+                    if (!MessageEnvelope.TryDecode(message, out var envelope, out var body, out _)) continue;
+                    if (_pending.TryRemove(envelope.CorrelationId, out var tcs)) tcs.TrySetResult((envelope, body));
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Fail every still-pending request instead of leaving it to hang until its own
+                // timeout — a dead receive loop otherwise looks identical to "no response yet".
+                foreach (var pending in _pending.Values) pending.TrySetException(ex);
             }
         }, _cts.Token);
     }

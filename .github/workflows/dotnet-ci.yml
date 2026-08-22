@@ -40,5 +40,8 @@ jobs:
       - name: Build
         run: dotnet build EspScreenBarcodeGenerator.slnx --no-restore --configuration Release
 
+      - name: Install Playwright browsers (for EspBarcode.Controller.Web.E2ETests)
+        run: pwsh tests/EspBarcode.Controller.Web.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
       - name: Test
         run: dotnet test EspScreenBarcodeGenerator.slnx --no-build --configuration Release --verbosity normal

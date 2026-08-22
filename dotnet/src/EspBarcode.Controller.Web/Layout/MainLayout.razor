@@ -1,0 +1,56 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ThemeService Theme
+@inject DeviceRegistry Devices
+@inject AutomationService Automation
+
+<div class="esb-app" data-theme="@(Theme.Current == AppTheme.Light ? "light" : "dark")">
+    <nav class="esb-sidebar">
+        <div class="esb-brand"><span class="esb-brand-dot"></span> ESP Barcode Control</div>
+        <NavLink class="esb-nav-link" href="" Match="NavLinkMatch.All">📊 Dashboard</NavLink>
+        <NavLink class="esb-nav-link" href="devices">🔌 Devices</NavLink>
+        <NavLink class="esb-nav-link" href="generator">🏷️ Generator</NavLink>
+        <NavLink class="esb-nav-link" href="library">💾 Library</NavLink>
+        <NavLink class="esb-nav-link" href="gateway">📡 Gateway</NavLink>
+        <NavLink class="esb-nav-link" href="automation">🤖 Automation</NavLink>
+        <div class="esb-nav-spacer"></div>
+        <NavLink class="esb-nav-link" href="settings">⚙️ Settings</NavLink>
+    </nav>
+    <main class="esb-main">
+        <div class="esb-topbar">
+            <span class="esb-badge @(Devices.Devices.Count(d => d.IsConnected) > 0 ? "esb-badge-ok" : "")">
+                @Devices.Devices.Count(d => d.IsConnected) device(s) connected
+            </span>
+            <div style="display:flex; align-items:center; gap:12px;">
+                @if (Automation.Settings.Enabled)
+                {
+                    <span class="esb-badge esb-badge-ok">Full Auto Mode</span>
+                }
+                <button class="esb-theme-toggle" type="button" @onclick="ToggleThemeAsync">
+                    @(Theme.Current == AppTheme.Dark ? "🌙 Dark" : "☀️ Light")
+                </button>
+            </div>
+        </div>
+        @Body
+    </main>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Theme.Changed += OnChanged;
+        Devices.Changed += OnChanged;
+        Automation.Changed += OnChanged;
+    }
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private Task ToggleThemeAsync() => Theme.ToggleAsync();
+
+    public void Dispose()
+    {
+        Theme.Changed -= OnChanged;
+        Devices.Changed -= OnChanged;
+        Automation.Changed -= OnChanged;
+    }
+}

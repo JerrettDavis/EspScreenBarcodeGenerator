@@ -1,0 +1,121 @@
+@page "/automation"
+@implements IDisposable
+@inject AutomationService AutomationSvc
+@inject BarcodeLibraryService Library
+@inject DeviceRegistry Devices
+
+<PageTitle>Automation - ESP Barcode Control</PageTitle>
+
+<h1 style="margin-top:0;">Full Auto Mode</h1>
+
+<div class="esb-card">
+    <div style="display:flex; align-items:center; gap:12px;">
+        <label class="esb-switch">
+            <input type="checkbox" data-testid="automation-enabled" checked="@_settings.Enabled"
+                   @onchange="@(e => _settings.Enabled = (bool)e.Value!)" />
+            <span class="esb-switch-track"></span>
+        </label>
+        <div>
+            <strong>Enable Full Auto Mode</strong>
+            <p class="esb-faint" style="margin:2px 0 0;">
+                Auto-reconnects known devices, polls their status, and (optionally) rotates a barcode
+                playlist across your displays — no further clicks needed.
+            </p>
+        </div>
+    </div>
+</div>
+
+<div class="esb-card">
+    <h2>Reconnection &amp; Monitoring</h2>
+    <label class="esb-checkbox" style="margin-bottom:10px;">
+        <input type="checkbox" checked="@_settings.AutoReconnect" @onchange="@(e => _settings.AutoReconnect = (bool)e.Value!)" />
+        Automatically reconnect previously-authorized devices
+    </label>
+    <div class="esb-field" style="max-width:220px;">
+        <label>Poll interval (seconds)</label>
+        <input type="number" min="1" class="esb-input" @bind="_settings.PollIntervalSeconds" />
+    </div>
+</div>
+
+<div class="esb-card">
+    <h2>Playlist Rotation</h2>
+    <label class="esb-checkbox" style="margin-bottom:10px;">
+        <input type="checkbox" data-testid="automation-rotate-enabled" checked="@_settings.RotateLibrary" @onchange="@(e => _settings.RotateLibrary = (bool)e.Value!)" />
+        Rotate through selected library items
+    </label>
+    <div class="esb-field" style="max-width:220px;">
+        <label>Rotate every (seconds)</label>
+        <input type="number" min="1" class="esb-input" data-testid="automation-rotate-interval" @bind="_settings.RotateIntervalSeconds" />
+    </div>
+
+    <h3>Playlist</h3>
+    @if (_items.Count == 0)
+    {
+        <p class="esb-muted">No library items yet — save some from the <a href="generator">Generator</a> page.</p>
+    }
+    else
+    {
+        @foreach (var item in _items)
+        {
+            <label class="esb-checkbox" style="margin-bottom:6px;" data-testid="automation-playlist-item" data-item-name="@item.Name">
+                <input type="checkbox" checked="@_settings.RotateLibraryItemIds.Contains(item.Id)"
+                       @onchange="@(e => ToggleSet(_settings.RotateLibraryItemIds, item.Id, (bool)e.Value!))" />
+                @item.Name
+            </label>
+        }
+    }
+
+    <h3>Target Devices <span class="esb-faint">(none selected = all connected devices)</span></h3>
+    @foreach (var device in Devices.Devices.Where(d => d.Mode == DeviceMode.Client))
+    {
+        <label class="esb-checkbox" style="margin-bottom:6px;">
+            <input type="checkbox" checked="@_settings.RotateTargetDeviceIds.Contains(device.Id)"
+                   @onchange="@(e => ToggleSet(_settings.RotateTargetDeviceIds, device.Id, (bool)e.Value!))" />
+            @device.Nickname
+        </label>
+    }
+</div>
+
+<button class="esb-btn esb-btn-primary" type="button" data-testid="automation-save" @onclick="SaveAsync">Save Settings</button>
+
+@if (AutomationSvc.LastActionSummary is not null)
+{
+    <div class="esb-alert esb-alert-info" style="margin-top:16px;" data-testid="automation-summary">@AutomationSvc.LastActionSummary</div>
+}
+
+@code {
+    private AutomationSettings _settings = new();
+    private IReadOnlyList<LibraryItem> _items = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = AutomationSvc.Settings.Clone();
+        _items = await Library.GetAllAsync();
+        AutomationSvc.Changed += OnChanged;
+        Library.Changed += OnLibraryChanged;
+        Devices.Changed += OnChanged;
+    }
+
+    private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private async void OnLibraryChanged() => await InvokeAsync(async () =>
+    {
+        _items = await Library.GetAllAsync();
+        StateHasChanged();
+    });
+
+    private static void ToggleSet(List<string> set, string id, bool selected)
+    {
+        if (selected) { if (!set.Contains(id)) set.Add(id); }
+        else set.Remove(id);
+    }
+
+    private async Task SaveAsync() => await AutomationSvc.ApplyAsync(_settings.Clone());
+
+    public void Dispose()
+    {
+        AutomationSvc.Changed -= OnChanged;
+        Library.Changed -= OnLibraryChanged;
+        Devices.Changed -= OnChanged;
+    }
+}
