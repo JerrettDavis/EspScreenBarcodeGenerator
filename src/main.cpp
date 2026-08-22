@@ -81,7 +81,7 @@ void loop() {
         if (legacyEndpoint.gatewayRequested()) {
             active = ActiveTransport::GatewayRelayMode;
             gatewayRelay.begin();  // takes over the ESP-NOW recv callback from espNowEndpoint
-            application.showHome("Gateway mode active: relaying USB <-> ESP-NOW");
+            application.enterGatewayMode();
         } else if (legacyEndpoint.upgradeRequested()) {
             active = ActiveTransport::CobsV2;
         }
@@ -89,6 +89,7 @@ void loop() {
         cobsEndpoint.loop();
     } else {
         gatewayRelay.loop();
+        application.updateGatewayStats(gatewayRelay.stats());
     }
     // GatewayRelayMode owns the ESP-NOW receive callback itself (see above); espNowEndpoint's
     // own loop() would just drain an empty queue, but skip it anyway for clarity.

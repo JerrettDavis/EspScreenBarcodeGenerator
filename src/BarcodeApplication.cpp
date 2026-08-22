@@ -122,6 +122,14 @@ Rect homeStatusRect(uint16_t width, uint16_t height) {
     return Rect{8, y, static_cast<int16_t>(width - 16), h};
 }
 
+// Gateway mode replaces the normal Home layout entirely (editing the barcode locally has no
+// purpose once this board is a pure USB<->ESP-NOW relay), so it gets its own single big button
+// rather than fighting the editor's action row for space.
+Rect homeGatewayButtonRect(uint16_t width, uint16_t height) {
+    const Rect title = homeTitleBarRect(width, height);
+    return Rect{8, static_cast<int16_t>(title.h + 28), static_cast<int16_t>(width - 16), 56};
+}
+
 struct KeyboardMetrics {
     int16_t top;
     int16_t rowHeight;
@@ -229,6 +237,7 @@ void BarcodeApplication::setOrientation(OrientationTarget target, ScreenOrientat
         case View::Options: drawOptions(); break;
         case View::Presets: drawPresets(); break;
         case View::Settings: drawSettings(); break;
+        case View::Gateway: drawGateway(); break;
         case View::Barcode: break;
     }
 }
@@ -311,6 +320,7 @@ void BarcodeApplication::handleTouch(uint16_t x, uint16_t y) {
         case View::Options: handleOptionsTouch(x, y); break;
         case View::Presets: handlePresetsTouch(x, y); break;
         case View::Settings: handleSettingsTouch(x, y); break;
+        case View::Gateway: handleGatewayTouch(x, y); break;
         case View::Barcode:
             if (millis() - barcodeShownAt_ >= app_config::kTouchCloseGuardMs) closeBarcode();
             break;
@@ -335,6 +345,20 @@ void BarcodeApplication::showHome(const std::string& status) {
     drawHome();
 }
 
+void BarcodeApplication::enterGatewayMode() {
+    gatewayModeActive_ = true;
+    showHome("Gateway mode active: relaying USB <-> ESP-NOW");
+}
+
+void BarcodeApplication::updateGatewayStats(const esplink::GatewayRelay::Stats& stats) {
+    gatewayStats_ = stats;
+    if (view_ != View::Gateway) return;
+    const uint32_t now = millis();
+    if (now - gatewayStatsRedrawAt_ < 1000) return;
+    gatewayStatsRedrawAt_ = now;
+    drawGateway();
+}
+
 void BarcodeApplication::drawHome() {
     applyOrientationForView(View::Home);
     const uint16_t width = tft_.width();
@@ -345,7 +369,12 @@ void BarcodeApplication::drawHome() {
     tft_.fillRect(title.x, title.y, title.w, title.h, kAccentDark);
     tft_.setTextDatum(MC_DATUM);
     tft_.setTextColor(kText, kAccentDark);
-    tft_.drawString("ESP BARCODE LAB", width / 2, title.h / 2, 4);
+    tft_.drawString(gatewayModeActive_ ? "GATEWAY MODE" : "ESP BARCODE LAB", width / 2, title.h / 2, 4);
+
+    if (gatewayModeActive_) {
+        drawGatewayHomeBanner();
+        return;
+    }
 
     const auto topRow = homeTopRow(width, height);
     drawButton(topRow[0], displayName(spec_.type), true);
@@ -365,6 +394,18 @@ void BarcodeApplication::drawHome() {
     drawButton(actionRow[4], "SETTINGS", false, kPanel);
     drawStatus();
     drawKeyboard();
+}
+
+void BarcodeApplication::drawGatewayHomeBanner() {
+    const uint16_t width = tft_.width();
+    const Rect title = homeTitleBarRect(width, tft_.height());
+
+    tft_.setTextDatum(TL_DATUM);
+    tft_.setTextColor(kMuted, kBackground);
+    const std::size_t maxChars = static_cast<std::size_t>(std::max(16, (width - 16) / 6));
+    tft_.drawString(clipped(status_, maxChars).c_str(), 8, title.h + 10, 1);
+
+    drawButton(homeGatewayButtonRect(width, tft_.height()), "VIEW GATEWAY STATS", true, kAccentDark);
 }
 
 void BarcodeApplication::drawDataPreview() {
@@ -450,6 +491,16 @@ void BarcodeApplication::drawKeyboard() {
 void BarcodeApplication::handleHomeTouch(uint16_t x, uint16_t y) {
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
+
+    if (gatewayModeActive_) {
+        if (homeGatewayButtonRect(width, height).contains(x, y, kTouchPad)) {
+            view_ = View::Gateway;
+            gatewayStatsRedrawAt_ = 0;  // force an immediate draw rather than waiting for the next throttled refresh
+            drawGateway();
+        }
+        return;
+    }
+
     const auto topRow = homeTopRow(width, height);
     const auto actionRow = homeActionRow(width, height);
     const KeyboardMetrics metrics = keyboardMetrics(width, height);
@@ -911,6 +962,103 @@ void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
     const ScreenOrientation current = row == 0 ? config_.barcodeOrientation() : config_.editorOrientation();
     const int next = (static_cast<int>(current) + direction + 4) % 4;
     setOrientation(target, static_cast<ScreenOrientation>(next));
+}
+
+namespace {
+constexpr int16_t kGatewayBackButtonHeight = 40;
+
+std::string formatMac(const std::array<uint8_t, 6>& mac) {
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return buf;
+}
+
+std::string formatAgeSeconds(uint32_t nowMs, uint32_t lastSeenMs) {
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%lus ago", static_cast<unsigned long>((nowMs - lastSeenMs) / 1000));
+    return buf;
+}
+}  // namespace
+
+void BarcodeApplication::drawGateway() {
+    applyOrientationForView(View::Gateway);
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const bool wide = width > height;
+
+    tft_.fillScreen(kBackground);
+    const int16_t headerH = static_cast<int16_t>(wide ? 24 : 32);
+    tft_.fillRect(0, 0, width, headerH, kAccentDark);
+    tft_.setTextDatum(MC_DATUM);
+    tft_.setTextColor(kText, kAccentDark);
+    tft_.drawString("GATEWAY", width / 2, headerH / 2, 4);
+
+    const esplink::GatewayStats::Snapshot& link = gatewayStats_.linkStats;
+    const int16_t rowH = static_cast<int16_t>(wide ? 20 : 24);
+    int16_t y = static_cast<int16_t>(headerH + 6);
+
+    auto drawStatLine = [&](const std::string& label, const std::string& value, uint16_t valueColor) {
+        tft_.setTextDatum(TL_DATUM);
+        tft_.setTextColor(kMuted, kBackground);
+        tft_.drawString(label.c_str(), 10, y + 3, 2);
+        tft_.setTextDatum(TR_DATUM);
+        tft_.setTextColor(valueColor, kBackground);
+        tft_.drawString(value.c_str(), width - 10, y + 3, 2);
+        y = static_cast<int16_t>(y + rowH);
+    };
+
+    const std::string hostValue = !link.hostEverSeen ? std::string("NONE")
+                                   : link.hostConnected
+                                       ? "UP (" + formatAgeSeconds(link.nowMs, link.hostLastSeenMs) + ")"
+                                       : "LOST (" + formatAgeSeconds(link.nowMs, link.hostLastSeenMs) + ")";
+    drawStatLine("USB host", hostValue, link.hostConnected ? kAccent : kDanger);
+
+    char countBuf[16];
+    std::snprintf(countBuf, sizeof(countBuf), "%u", static_cast<unsigned>(link.peerCount));
+    drawStatLine("ESP-NOW clients", countBuf, kText);
+
+    std::snprintf(countBuf, sizeof(countBuf), "%lu", static_cast<unsigned long>(gatewayStats_.usbToEspNowMessageCount));
+    drawStatLine("Sent USB->ESPNOW", countBuf, kText);
+
+    std::snprintf(countBuf, sizeof(countBuf), "%lu", static_cast<unsigned long>(gatewayStats_.espNowToUsbMessageCount));
+    drawStatLine("Sent ESPNOW->USB", countBuf, kText);
+
+    y = static_cast<int16_t>(y + 4);
+    tft_.drawFastHLine(8, y, static_cast<int16_t>(width - 16), kPanelAlt);
+    y = static_cast<int16_t>(y + 8);
+
+    const int16_t backY = static_cast<int16_t>(height - kGatewayBackButtonHeight - 6);
+    const int16_t peerRowH = static_cast<int16_t>(wide ? 16 : 18);
+    std::size_t shown = 0;
+    for (; shown < link.peerCount; ++shown) {
+        if (y + peerRowH > backY - 4) break;
+        const auto& peer = link.peers[shown];
+        tft_.setTextDatum(TL_DATUM);
+        tft_.setTextColor(kText, kBackground);
+        tft_.drawString(formatMac(peer.mac).c_str(), 10, y + 2, 1);
+        tft_.setTextDatum(TR_DATUM);
+        tft_.setTextColor(kMuted, kBackground);
+        tft_.drawString(formatAgeSeconds(link.nowMs, peer.lastSeenMs).c_str(), width - 10, y + 2, 1);
+        y = static_cast<int16_t>(y + peerRowH);
+    }
+    if (shown < link.peerCount) {
+        char more[24];
+        std::snprintf(more, sizeof(more), "+%u more not shown", static_cast<unsigned>(link.peerCount - shown));
+        tft_.setTextDatum(TL_DATUM);
+        tft_.setTextColor(kMuted, kBackground);
+        tft_.drawString(more, 10, y + 2, 1);
+    }
+
+    drawButton({8, backY, static_cast<int16_t>(width - 16), kGatewayBackButtonHeight}, "BACK");
+}
+
+void BarcodeApplication::handleGatewayTouch(uint16_t x, uint16_t y) {
+    (void)x;
+    const uint16_t height = tft_.height();
+    const int16_t backY = static_cast<int16_t>(height - kGatewayBackButtonHeight - 6);
+    if (y >= static_cast<uint16_t>(backY - kTouchPad)) {
+        showHome();
+    }
 }
 
 bool BarcodeApplication::generate(const BarcodeSpec& spec, bool display, std::string& error) {

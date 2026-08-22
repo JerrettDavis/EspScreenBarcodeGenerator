@@ -38,6 +38,7 @@ void GatewayRelay::loop() {
 
 void GatewayRelay::pollUsb() {
     while (Serial.available() > 0) {
+        linkStats_.recordHostActivity(millis());
         const uint8_t b = static_cast<uint8_t>(Serial.read());
         if (b == 0x00) {
             if (!rxBlock_.empty()) processUsbCobsBlock(rxBlock_);
@@ -65,7 +66,9 @@ void GatewayRelay::processUsbCobsBlock(const std::vector<uint8_t>& block) {
 }
 
 void GatewayRelay::enqueueFromEspNow(const uint8_t* mac, const uint8_t* data, std::size_t length) {
-    (void)mac;  // this relay accepts any sender this session, same as EspNowEndpoint
+    // This relay accepts any sender this session (no pairing handshake); the MAC is only kept
+    // for the gateway stats screen's "negotiated clients" list, recorded once the datagram is
+    // drained on the main loop (see processEspNowDatagram) rather than here in callback context.
     if (length > kEspNowMaxDatagramBytes) return;  // cannot happen from a real ESP-NOW radio; defensive only
 
     portENTER_CRITICAL(&rxMux_);
@@ -77,6 +80,7 @@ void GatewayRelay::enqueueFromEspNow(const uint8_t* mac, const uint8_t* data, st
     }
     RxDatagram& slot = rxQueue_[rxTail_];
     memcpy(slot.bytes.data(), data, length);
+    memcpy(slot.mac.data(), mac, slot.mac.size());
     slot.length = length;
     rxTail_ = nextTail;
     portEXIT_CRITICAL(&rxMux_);
@@ -98,6 +102,8 @@ void GatewayRelay::drainEspNowQueue() {
 }
 
 void GatewayRelay::processEspNowDatagram(const RxDatagram& datagram) {
+    linkStats_.recordPeerSeen(datagram.mac.data(), millis());
+
     HopFrameHeader header;
     std::vector<uint8_t> payload;
     CodecError frameError;
@@ -137,6 +143,16 @@ void GatewayRelay::sendUsbFrame(const std::vector<uint8_t>& frame) {
     const std::vector<uint8_t> cobs = cobsEncode(frame.data(), frame.size());
     Serial.write(cobs.data(), cobs.size());
     Serial.write(static_cast<uint8_t>(0x00));
+}
+
+GatewayRelay::Stats GatewayRelay::stats() const {
+    Stats out;
+    out.linkStats = linkStats_.snapshot(millis());
+    // Counters are pre-incremented (post-increment on send, starting at 1), so the number of
+    // messages actually sent so far is one less than the next id they'd be stamped with.
+    out.usbToEspNowMessageCount = usbToEspNowLinkMessageCounter_ - 1;
+    out.espNowToUsbMessageCount = espNowToUsbLinkMessageCounter_ - 1;
+    return out;
 }
 
 }  // namespace esplink

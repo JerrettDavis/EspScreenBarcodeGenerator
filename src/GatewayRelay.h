@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "FrameAssembler.h"
+#include "GatewayStats.h"
 #include "HopFrame.h"
 
 namespace esplink {
@@ -39,9 +40,20 @@ public:
 
     GatewayRelay();
 
+    // Live monitoring snapshot for the on-device gateway stats screen (see BarcodeApplication's
+    // View::Gateway). usbToEspNowMessageCount/espNowToUsbMessageCount are the number of relayed
+    // messages sent so far on each leg.
+    struct Stats {
+        GatewayStats::Snapshot linkStats;
+        uint32_t usbToEspNowMessageCount = 0;
+        uint32_t espNowToUsbMessageCount = 0;
+    };
+    Stats stats() const;
+
 private:
     struct RxDatagram {
         std::array<uint8_t, kEspNowMaxDatagramBytes> bytes{};
+        std::array<uint8_t, 6> mac{};
         std::size_t length = 0;
     };
 
@@ -58,6 +70,7 @@ private:
     std::vector<uint8_t> rxBlock_;  // USB COBS accumulation buffer
     uint32_t usbToEspNowLinkMessageCounter_ = 1;
     uint32_t espNowToUsbLinkMessageCounter_ = 1;
+    GatewayStats linkStats_;
 
     std::array<RxDatagram, kEspNowRxQueueCapacity> rxQueue_{};
     volatile std::size_t rxHead_ = 0;  // next slot loop() reads

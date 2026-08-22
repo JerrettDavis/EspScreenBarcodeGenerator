@@ -9,6 +9,7 @@
 
 #include "DeviceConfigStore.h"
 #include "EspBarcodeCore.h"
+#include "GatewayRelay.h"
 #include "PresetStore.h"
 #include "ScreenOrientation.h"
 #include "UiRect.h"
@@ -31,6 +32,10 @@ public:
     void closeBarcode();
     void showHome(const std::string& status = {});
     void setBacklight(bool on);
+    // Permanently switches the Home screen into gateway-mode layout (a status banner and a
+    // button to the live stats screen) -- mirrors GatewayRelay's one-way mode switch in main.cpp.
+    void enterGatewayMode();
+    void updateGatewayStats(const esplink::GatewayRelay::Stats& stats);
     void setOrientation(esplink::OrientationTarget target, esplink::ScreenOrientation value);
     esplink::ScreenOrientation barcodeOrientation() const { return config_.barcodeOrientation(); }
     esplink::ScreenOrientation editorOrientation() const { return config_.editorOrientation(); }
@@ -50,7 +55,7 @@ public:
     using Rect = uigeom::Rect;
 
 private:
-    enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcode };
+    enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcode, Gateway };
     enum class KeyboardPage : uint8_t { Upper, Lower, Numeric, Symbols };
 
     void pollTouch();
@@ -62,14 +67,17 @@ private:
     void handlePresetsTouch(uint16_t x, uint16_t y);
     void handleSettingsTouch(uint16_t x, uint16_t y);
     void handleKeyboardTouch(uint16_t x, uint16_t y);
+    void handleGatewayTouch(uint16_t x, uint16_t y);
 
     void applyOrientationForView(View view);
 
     void drawHome();
+    void drawGatewayHomeBanner();
     void drawTypePicker();
     void drawOptions();
     void drawPresets();
     void drawSettings();
+    void drawGateway();
     void drawKeyboard();
     void drawButton(const Rect& rect,
                     const std::string& text,
@@ -109,4 +117,8 @@ private:
     bool touchDown_ = false;
     std::size_t presetPage_ = 0;
     bool presetDeleteMode_ = false;
+
+    bool gatewayModeActive_ = false;
+    esplink::GatewayRelay::Stats gatewayStats_{};
+    uint32_t gatewayStatsRedrawAt_ = 0;
 };
