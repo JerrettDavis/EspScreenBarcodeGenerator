@@ -126,6 +126,9 @@ ControlProtocolEngine::CommandResult ControlProtocolEngine::handleStatus() const
     response.currentRaw = device_.currentIsRaw();
     response.status = device_.statusText();
     response.freeHeap = deviceControl_.freeHeapBytes();
+    if (gatewayLinkStatusSource_ != nullptr) {
+        response.gatewayLink = gatewayLinkStatusSource_->gatewayLinkStatus();
+    }
     if (device_.hasCurrent()) {
         const auto& result = device_.currentResult();
         CurrentSymbolInfo current;

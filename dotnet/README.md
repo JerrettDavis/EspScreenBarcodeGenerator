@@ -176,13 +176,35 @@ dotnet run --project src/EspBarcode.Controller.Web
 
 Then open the printed `http://localhost:...` URL in Chrome or Edge. Pages:
 **Dashboard** (fleet overview), **Devices** (pair/monitor/reboot/orientation/
-gateway-mode entry), **Generator** (build a barcode, push to one or more
-devices, live preview downloaded from the device itself), **Library**
-(browser-local saved specs + each device's on-board LittleFS presets),
-**Gateway** (drive the EspLink v2 relay once a board is in gateway mode),
-**Automation** (Full Auto Mode: unattended reconnect/poll/playlist rotation),
-and **Settings** (light/dark theme — same palette as `lib/UiGeometry/src/Theme.h`,
-so the browser app and the physical screens match).
+gateway-mode entry — a plain client board also shows its own ESP-NOW
+gateway-discovery status, see below), **Generator** (build a barcode, push to
+one or more devices, live preview downloaded from the device itself),
+**Library** (browser-local saved specs + each device's on-board LittleFS
+presets), **Gateway** (drive the EspLink v2 relay once a board is in gateway
+mode, including its discovered/relayed ESP-NOW peers), **Automation** (Full
+Auto Mode: unattended reconnect/poll/playlist rotation), and **Settings**
+(light/dark theme — same palette as `lib/UiGeometry/src/Theme.h`, so the
+browser app and the physical screens match).
+
+### Gateway ↔ client discovery ping/pong
+
+A gateway-mode board and any plain client board can find each other over
+ESP-NOW without a host in the loop, using a new `ServiceId::Gateway`
+(`gateway.link.ping`/`gateway.link.pong`) broadcast exchange — either role can
+initiate. The Gateway page's **"Ping for Clients"** button asks the gateway
+board to broadcast a discovery ping immediately (it also does this on its own
+every ~2s); **"Refresh Peers"** re-reads its live peer list — MAC/device
+id/RTT/last-seen, tagged by whether a peer was seen via real relayed traffic,
+discovery ping, or both. Both `gateway.peers.list` and `gateway.ping.now` are
+answered by the gateway board itself over USB (never relayed across
+ESP-NOW), a deliberate, narrow exception to `GatewayRelay`'s usual
+protocol-blind pass-through. A plain client board runs the other half
+continuously in the background (no host command needed) and reports its own
+"have I seen a gateway?" state through the ordinary `status` command's new
+`gateway_link` field, shown on the Devices page. The same indicators exist
+on the physical TFT screens: the Gateway stats screen gets a **PING** button
+and per-peer RTT, and a plain client's Settings screen gets a small
+"ESP-NOW Gateway: searching…/connected" row.
 
 ### E2E tests (`EspBarcode.Controller.Web.E2ETests`)
 

@@ -34,6 +34,34 @@ else
                 <button class="esb-btn esb-btn-sm" type="button" disabled="@_busy" @onclick="@(() => SayHelloAsync(device))">
                     Re-negotiate (system.hello)
                 </button>
+                <button class="esb-btn esb-btn-sm" type="button" disabled="@_busy" data-testid="gateway-ping-now"
+                        @onclick="@(() => PingNowAsync(device))">
+                    Ping for Clients
+                </button>
+                <button class="esb-btn esb-btn-sm" type="button" disabled="@_busy" data-testid="gateway-refresh-peers"
+                        @onclick="@(() => RefreshPeersAsync(device))">
+                    Refresh Peers
+                </button>
+            </div>
+
+            <div class="esb-card" style="margin:0 0 12px; padding:10px;" data-testid="gateway-peers">
+                <div class="esb-muted" style="font-weight:600; margin-bottom:6px;">Discovered / relayed peers</div>
+                @if (!_peers.TryGetValue(device.Id, out var peers) || peers.Count == 0)
+                {
+                    <p class="esb-faint" style="margin:0;">No ESP-NOW peers seen yet — try "Ping for Clients".</p>
+                }
+                else
+                {
+                    @foreach (var peer in peers)
+                    {
+                        <div style="display:flex; justify-content:space-between; gap:8px; padding:3px 0; font-size:0.85em;" data-testid="gateway-peer-row">
+                            <span>@(string.IsNullOrEmpty(peer.DeviceId) ? peer.Mac : peer.DeviceId)</span>
+                            <span class="esb-faint">
+                                @(peer.ViaPing ? $"~{peer.RttMs}ms · " : "")seen @(peer.LastSeenMsAgo / 1000)s ago@(peer.ViaRelay ? " · relaying" : "")
+                            </span>
+                        </div>
+                    }
+                }
             </div>
 
             <div class="esb-form-row">
@@ -78,6 +106,7 @@ else
     private readonly Dictionary<string, string> _data = new();
     private readonly Dictionary<string, GenerateResult> _results = new();
     private readonly Dictionary<string, string> _errors = new();
+    private readonly Dictionary<string, IReadOnlyList<GatewayPeer>> _peers = new();
 
     private List<DeviceConnection> GatewayDevices =>
         Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay).ToList();
@@ -100,6 +129,47 @@ else
         try
         {
             await device.GatewayLink.HelloAsync();
+        }
+        catch (Exception ex)
+        {
+            _errors[device.Id] = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RefreshPeersAsync(DeviceConnection device)
+    {
+        if (device.GatewayLink is null) return;
+        _busy = true;
+        _errors.Remove(device.Id);
+        try
+        {
+            _peers[device.Id] = await device.GatewayLink.ListPeersAsync();
+        }
+        catch (Exception ex)
+        {
+            _errors[device.Id] = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PingNowAsync(DeviceConnection device)
+    {
+        if (device.GatewayLink is null) return;
+        _busy = true;
+        _errors.Remove(device.Id);
+        try
+        {
+            await device.GatewayLink.PingNowAsync();
+            // Give prospective clients a moment to answer before we ask for the updated list.
+            await Task.Delay(1200);
+            _peers[device.Id] = await device.GatewayLink.ListPeersAsync();
         }
         catch (Exception ex)
         {

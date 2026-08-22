@@ -115,9 +115,17 @@ public sealed class EspDeviceClient(WebSerialConnection connection)
     public async Task<StatusInfo> StatusAsync(CancellationToken ct = default)
     {
         var r = await RequestAsync("status", cancellationToken: ct);
+        GatewayLinkStatus? gatewayLink = null;
+        if (r["gateway_link"] as JsonObject is { } link)
+        {
+            gatewayLink = new GatewayLinkStatus(
+                link["connected"]!.GetValue<bool>(), link["age_ms"]!.GetValue<long>(),
+                link["rtt_ms"]!.GetValue<long>(), link["gateway_id"]?.GetValue<string>() ?? "");
+        }
         return new StatusInfo(
             r["barcode_visible"]!.GetValue<bool>(), r["has_current"]!.GetValue<bool>(),
-            r["current_raw"]!.GetValue<bool>(), r["status"]!.GetValue<string>(), r["free_heap"]!.GetValue<long>());
+            r["current_raw"]!.GetValue<bool>(), r["status"]!.GetValue<string>(), r["free_heap"]!.GetValue<long>(),
+            gatewayLink);
     }
 
     public async Task<GenerateResult> GenerateAsync(GenerateOptions options, CancellationToken ct = default)

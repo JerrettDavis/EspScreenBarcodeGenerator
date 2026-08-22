@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 namespace esplink {
 
@@ -16,9 +17,19 @@ class GatewayStats {
 public:
     static constexpr std::size_t kMaxPeers = 8;
 
+    // deviceId is bounded (not std::string) to keep this hot-path bookkeeping allocation-free,
+    // matching the class's existing "portable, allocation-free" contract.
+    static constexpr std::size_t kMaxDeviceIdLen = 23;
+
     struct Peer {
         std::array<uint8_t, 6> mac{};
         uint32_t lastSeenMs = 0;
+        bool everRelayed = false;  // has carried at least one real (non-discovery) relayed message
+        bool everPinged = false;   // has answered at least one gateway.link.pong discovery probe
+        uint32_t lastRttMs = 0;    // valid only if everPinged
+        std::array<char, kMaxDeviceIdLen + 1> deviceId{};  // NUL-terminated; empty if unknown
+
+        const char* deviceIdCStr() const { return deviceId.data(); }
     };
 
     struct Snapshot {
@@ -30,10 +41,15 @@ public:
         uint32_t nowMs = 0;
     };
 
-    // Records (or refreshes) a peer sighting. Once kMaxPeers distinct MACs have been observed,
-    // the least-recently-seen peer is evicted for the new one, so a flaky/rotating sender can't
-    // wedge out a peer that's still actively relaying.
+    // Records (or refreshes) a peer sighting from real relayed traffic. Once kMaxPeers distinct
+    // MACs have been observed, the least-recently-seen peer is evicted for the new one, so a
+    // flaky/rotating sender can't wedge out a peer that's still actively relaying.
     void recordPeerSeen(const uint8_t mac[6], uint32_t nowMs);
+
+    // Records a reply to this gateway's own discovery probe (gateway.link.pong), separate from
+    // recordPeerSeen since a prospective client may answer pings long before (or without ever)
+    // carrying real relayed traffic. deviceId is truncated to kMaxDeviceIdLen if longer.
+    void recordDiscoveryPong(const uint8_t mac[6], uint32_t nowMs, uint32_t rttMs, const char* deviceId);
 
     // Marks the USB host as active as of nowMs. Call once per received host byte/frame.
     void recordHostActivity(uint32_t nowMs);
@@ -43,6 +59,11 @@ public:
     Snapshot snapshot(uint32_t nowMs, uint32_t hostTimeoutMs = 3000) const;
 
 private:
+    // Finds the peer slot for `mac`, inserting (or evicting the least-recently-seen slot) if
+    // this MAC hasn't been seen before. Shared by recordPeerSeen/recordDiscoveryPong so both
+    // "channels" of sighting a peer (relay traffic vs. discovery pong) update the same entry.
+    std::size_t findOrCreatePeerIndex(const uint8_t mac[6], uint32_t nowMs);
+
     std::array<Peer, kMaxPeers> peers_{};
     std::size_t peerCount_ = 0;
     bool hostEverSeen_ = false;

@@ -6,6 +6,7 @@
 #include <variant>
 #include <vector>
 
+#include "ApplicationPorts.h"
 #include "EspBarcodeCore.h"
 #include "ScreenOrientation.h"
 
@@ -120,6 +121,9 @@ struct StatusResponse {
     std::string status;
     uint32_t freeHeap = 0;
     std::optional<CurrentSymbolInfo> current;
+    // Set only when this board has a gateway-link status source wired up (i.e. it's running
+    // EspNowEndpoint's discovery ping/pong, not just a build without ESP-NOW support).
+    std::optional<GatewayLinkInfo> gatewayLink;
 };
 
 struct GenerateResponse {

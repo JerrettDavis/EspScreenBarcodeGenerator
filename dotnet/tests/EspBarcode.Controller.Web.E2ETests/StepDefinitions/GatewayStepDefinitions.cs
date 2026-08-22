@@ -48,4 +48,26 @@ public class GatewayStepDefinitions(TestWorld world)
     [Then("the relay reports a successful generate result")]
     public async Task ThenRelayReportsSuccess()
         => await Assertions.Expect(Page.Locator("[data-testid=gateway-card]").First).ToContainTextAsync("Relayed:");
+
+    [When("I click \"Ping for Clients\" for that device")]
+    public async Task WhenIClickPingForClients()
+    {
+        await Page.Locator("[data-testid=gateway-ping-now]").First.ClickAsync();
+        await Task.Delay(1500); // the app itself waits ~1.2s before re-listing peers after a ping
+    }
+
+    [When("I click \"Refresh Peers\" for that device")]
+    public async Task WhenIClickRefreshPeers()
+    {
+        await Page.Locator("[data-testid=gateway-refresh-peers]").First.ClickAsync();
+        await Task.Delay(300);
+    }
+
+    [Then("the Gateway page lists a discovered peer for that device")]
+    public async Task ThenGatewayListsDiscoveredPeer()
+        => await Assertions.Expect(Page.Locator("[data-testid=gateway-peer-row]").First).ToBeVisibleAsync();
+
+    [Then("the Gateway page shows no discovered peers for that device")]
+    public async Task ThenGatewayShowsNoPeers()
+        => await Assertions.Expect(Page.Locator("[data-testid=gateway-peers]").First).ToContainTextAsync("No ESP-NOW peers seen yet");
 }

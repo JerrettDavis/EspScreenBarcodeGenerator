@@ -55,4 +55,26 @@ public:
     virtual void reboot() = 0;
 };
 
+// Snapshot of this board's own ESP-NOW gateway-discovery state, as tracked by whichever
+// endpoint owns the radio (normally EspNowEndpoint) — see the "gateway.link.ping"/
+// "gateway.link.pong" discovery messages under ServiceId::Gateway. `connected` reflects
+// recency only (a gateway broadcast/reply seen within a short timeout), matching the same
+// "no pairing handshake" philosophy GatewayStats already uses for the gateway's own peer list.
+struct GatewayLinkInfo {
+    bool connected = false;
+    uint32_t ageMs = 0;    // ms since the last gateway ping/pong was seen; meaningful only if gatewayId is non-empty
+    uint32_t rttMs = 0;    // round-trip time of the most recent probe this board sent, if any
+    std::string gatewayId; // empty until a gateway has been seen at least once this boot
+};
+
+// Implemented by whichever endpoint owns the ESP-NOW radio (EspNowEndpoint in practice) so
+// ControlProtocolEngine can surface gateway-discovery state through the ordinary `status`
+// command without depending on any Arduino/ESP-NOW header itself (this library stays portable
+// and host-testable; EspNowEndpoint, which is not, lives outside it in `src/`).
+class IGatewayLinkStatusSource {
+public:
+    virtual ~IGatewayLinkStatusSource() = default;
+    virtual GatewayLinkInfo gatewayLinkStatus() const = 0;
+};
+
 }  // namespace esplink

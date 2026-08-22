@@ -20,6 +20,11 @@ public:
     ControlProtocolEngine(IBarcodeDevice& device, IPresetRepository& presets,
                           IDeviceControl& deviceControl, std::string firmwareVersion);
 
+    // Optional: wires `status`'s response to include the board's own ESP-NOW gateway-discovery
+    // state (see IGatewayLinkStatusSource). Not required at construction so host-side unit
+    // tests and any build without ESP-NOW support don't need a fake implementation.
+    void setGatewayLinkStatusSource(const IGatewayLinkStatusSource* source) { gatewayLinkStatusSource_ = source; }
+
     // `transportName` (e.g. "usb-uart-ndjson", "usb-cobs-v2") is embedded verbatim in
     // `hello`'s response and `home`'s internal status text. The engine never branches on it.
     void handle(ControlSession& session, const Command& command, OperationId operationId,
@@ -54,6 +59,7 @@ private:
     IPresetRepository& presets_;
     IDeviceControl& deviceControl_;
     std::string firmwareVersion_;
+    const IGatewayLinkStatusSource* gatewayLinkStatusSource_ = nullptr;
 };
 
 const char* commandCatalogName(const Command& command);

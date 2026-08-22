@@ -343,6 +343,13 @@ void JsonCommandCodec::encodeBody(const Response& response, JsonObject body) {
             body["current_raw"] = value.currentRaw;
             body["status"] = value.status;
             body["free_heap"] = value.freeHeap;
+            if (value.gatewayLink.has_value()) {
+                const auto& link = *value.gatewayLink;
+                body["gateway_link"]["connected"] = link.connected;
+                body["gateway_link"]["age_ms"] = link.ageMs;
+                body["gateway_link"]["rtt_ms"] = link.rttMs;
+                if (!link.gatewayId.empty()) body["gateway_link"]["gateway_id"] = link.gatewayId;
+            }
             if (value.current.has_value()) {
                 const auto& current = *value.current;
                 body["current"]["label"] = current.label;

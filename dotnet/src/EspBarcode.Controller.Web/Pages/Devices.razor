@@ -70,6 +70,16 @@ else
                         @status.Status · free heap @status.FreeHeap bytes
                     </p>
                 }
+                @if (device.Mode == DeviceMode.Client && device.LastStatus?.GatewayLink is { } link)
+                {
+                    <p style="margin:0 0 10px;" data-testid="gateway-link-status">
+                        <span class="esb-badge @(link.Connected ? "esb-badge-ok" : "esb-badge-warn")">
+                            @(link.Connected
+                                ? $"ESP-NOW gateway: {link.GatewayId} ({link.RttMs}ms)"
+                                : string.IsNullOrEmpty(link.GatewayId) ? "ESP-NOW gateway: searching…" : "ESP-NOW gateway: lost")
+                        </span>
+                    </p>
+                }
                 @if (device.LastError is not null)
                 {
                     <p class="esb-faint" style="color:var(--esb-danger);">@device.LastError</p>

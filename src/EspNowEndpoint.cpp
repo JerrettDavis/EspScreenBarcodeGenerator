@@ -111,6 +111,7 @@ void EspNowEndpoint::loop() {
 
         processDatagram(datagram);
     }
+    maybeSendGatewayProbe();
 }
 
 void EspNowEndpoint::processDatagram(const RxDatagram& datagram) {
@@ -132,11 +133,19 @@ void EspNowEndpoint::processDatagram(const RxDatagram& datagram) {
 }
 
 void EspNowEndpoint::processMessage(const MessageEnvelope& envelope, const std::vector<uint8_t>& body) {
-    if (envelope.kind != MessageKind::Command) return;  // this endpoint only accepts commands from a controller
-
     JsonDocument document;
     if (deserializeJson(document, body.data(), body.size())) return;
     JsonObjectConst wrapper = document.as<JsonObjectConst>();
+
+    if (envelope.serviceId == ServiceId::Gateway) {
+        // Discovery ping/pong is a separate, Event-kind side channel — never dispatched
+        // through ControlProtocolEngine (see the class comment above).
+        handleGatewayLinkMessage(wrapper);
+        return;
+    }
+
+    if (envelope.kind != MessageKind::Command) return;  // this endpoint only accepts commands from a controller
+
     const char* name = wrapper["name"] | "";
     JsonObjectConst innerBody = wrapper["body"].as<JsonObjectConst>();
 
@@ -157,6 +166,67 @@ void EspNowEndpoint::processMessage(const MessageEnvelope& envelope, const std::
     }
 
     engine_.handle(session_, command, OperationId{envelope.operationId}, "espnow-v1", *this);
+}
+
+void EspNowEndpoint::handleGatewayLinkMessage(JsonObjectConst wrapper) {
+    const char* name = wrapper["name"] | "";
+    JsonObjectConst body = wrapper["body"].as<JsonObjectConst>();
+    const char* role = body["role"] | "";
+    if (std::strcmp(role, "gateway") != 0) return;  // ignore chatter from other clients
+
+    lastGatewaySeenMs_ = millis();
+    lastGatewayId_ = std::string(body["deviceId"] | "");
+
+    if (std::strcmp(name, "gateway.link.ping") == 0) {
+        // A gateway is broadcasting for prospective clients — echo its ts back so it can
+        // compute RTT, and reply so it can list us as a discovered peer.
+        const uint32_t ts = body["ts"] | 0;
+        sendGatewayLinkEvent("gateway.link.pong", ts);
+    } else if (std::strcmp(name, "gateway.link.pong") == 0) {
+        // Reply to our own outbound probe (maybeSendGatewayProbe) — echoTs is the ts we sent.
+        const uint32_t echoTs = body["echoTs"] | 0;
+        const uint32_t now = millis();
+        if (echoTs != 0 && now >= echoTs) lastGatewayRttMs_ = now - echoTs;
+    }
+}
+
+void EspNowEndpoint::maybeSendGatewayProbe() {
+    const uint32_t now = millis();
+    const bool connected = lastGatewaySeenMs_ != 0 && (now - lastGatewaySeenMs_) <= kGatewayLinkTimeoutMs;
+    const uint32_t interval = connected ? kGatewayKeepaliveIntervalMs : kGatewayProbeIntervalMs;
+    if (lastProbeSentMs_ != 0 && (now - lastProbeSentMs_) < interval) return;
+
+    lastProbeSentMs_ = now;
+    lastProbeTs_ = now;
+    sendGatewayLinkEvent("gateway.link.ping", 0);
+}
+
+void EspNowEndpoint::sendGatewayLinkEvent(const char* eventName, uint32_t echoTs) {
+    JsonDocument wrapper;
+    wrapper["schema"] = "esbg.control/2.0";
+    wrapper["name"] = eventName;
+    JsonObject body = wrapper["body"].to<JsonObject>();
+    body["role"] = "client";
+    body["deviceId"] = macAddress_;
+    body["firmware"] = ESPBARCODE_VERSION;
+    body["ts"] = millis();
+    if (echoTs != 0) body["echoTs"] = echoTs;
+
+    std::string serialized;
+    serializeJson(wrapper, serialized);
+    const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
+    sendEnvelope(MessageKind::Event, ServiceId::Gateway, bodyBytes, 0);
+}
+
+GatewayLinkInfo EspNowEndpoint::gatewayLinkStatus() const {
+    GatewayLinkInfo info;
+    if (lastGatewaySeenMs_ == 0) return info;  // never seen a gateway — defaults are correct
+    const uint32_t now = millis();
+    info.ageMs = now - lastGatewaySeenMs_;
+    info.connected = info.ageMs <= kGatewayLinkTimeoutMs;
+    info.rttMs = lastGatewayRttMs_;
+    info.gatewayId = lastGatewayId_;
+    return info;
 }
 
 // Same v2-name -> v1-name subset SerialCobsEndpoint maps (docs/PROTOCOL_V2.md §7) — the

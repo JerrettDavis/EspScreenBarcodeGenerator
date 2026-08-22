@@ -399,6 +399,15 @@ Rect gatewayStatusPillRect(int16_t contentTop) {
     return Rect{8, static_cast<int16_t>(contentTop + 6), 170, 22};
 }
 
+Rect gatewayPingButtonRect(int16_t contentTop, uint16_t width) {
+    constexpr int16_t w = 68;
+    return Rect{static_cast<int16_t>(width - w - 8), static_cast<int16_t>(contentTop + 6), w, 22};
+}
+
+Rect gatewayLinkStatusRowRect(uint16_t width, int16_t cardBottom) {
+    return Rect{8, static_cast<int16_t>(cardBottom + 12), static_cast<int16_t>(width - 16), 28};
+}
+
 std::array<Rect, 3> gatewayStatTiles(uint16_t width, int16_t y) {
     const auto row = distributeRow(width, y, 40, 3, 8, 6);
     return {row[0], row[1], row[2]};
@@ -714,6 +723,21 @@ void BarcodeApplication::updateGatewayStats(const esplink::GatewayRelay::Stats& 
     if (now - gatewayStatsRedrawAt_ < 1000) return;
     gatewayStatsRedrawAt_ = now;
     drawGateway();
+}
+
+void BarcodeApplication::updateGatewayLinkStatus(const esplink::GatewayLinkInfo& status) {
+    gatewayLinkStatus_ = status;
+    if (view_ != View::Settings) return;
+    const uint32_t now = millis();
+    if (now - gatewayLinkRedrawAt_ < 1000) return;
+    gatewayLinkRedrawAt_ = now;
+    drawSettings();
+}
+
+bool BarcodeApplication::consumeGatewayPingRequest() {
+    if (!gatewayPingRequested_) return false;
+    gatewayPingRequested_ = false;
+    return true;
 }
 
 void BarcodeApplication::rebootDevice() {
@@ -1374,6 +1398,29 @@ void BarcodeApplication::drawSettings() {
             std::string("<  ") + orientationLabel(rows[static_cast<std::size_t>(row)].second) + " deg  >";
         tft_.drawString(label.c_str(), static_cast<int16_t>(card.x + card.w - 14), static_cast<int16_t>(y + rowH / 2), 2);
     }
+
+    // Gateway relay mode has its own live stats screen (View::Gateway) for this board's own
+    // radio role; this row is the complementary "am I near a gateway?" indicator for a board
+    // running as a plain client, fed by EspNowEndpoint's discovery ping/pong (see main.cpp).
+    if (!gatewayModeActive_) {
+        const Rect linkRow = gatewayLinkStatusRowRect(width, static_cast<int16_t>(card.y + card.h));
+        tft_.fillRoundRect(linkRow.x, linkRow.y, linkRow.w, linkRow.h, 10, th.surface);
+        tft_.drawRoundRect(linkRow.x, linkRow.y, linkRow.w, linkRow.h, 10, th.hairline);
+        tft_.fillCircle(static_cast<int16_t>(linkRow.x + 16), static_cast<int16_t>(linkRow.y + linkRow.h / 2), 4,
+                        gatewayLinkStatus_.connected ? th.accent : th.textFaint);
+        tft_.setTextDatum(ML_DATUM);
+        tft_.setTextColor(th.text, th.surface);
+        std::string label;
+        if (gatewayLinkStatus_.connected) {
+            label = "ESP-NOW Gateway: connected";
+            if (gatewayLinkStatus_.rttMs > 0) label += " (" + std::to_string(gatewayLinkStatus_.rttMs) + "ms)";
+        } else if (!gatewayLinkStatus_.gatewayId.empty()) {
+            label = "ESP-NOW Gateway: lost";
+        } else {
+            label = "ESP-NOW Gateway: searching...";
+        }
+        tft_.drawString(label.c_str(), static_cast<int16_t>(linkRow.x + 28), static_cast<int16_t>(linkRow.y + linkRow.h / 2), 1);
+    }
 }
 
 void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
@@ -1414,6 +1461,14 @@ void BarcodeApplication::drawGateway() {
     const char* hostLabel = !link.hostEverSeen ? "NO HOST YET" : link.hostConnected ? "USB HOST CONNECTED" : "USB HOST LOST";
     tft_.drawString(hostLabel, static_cast<int16_t>(pill.x + 24), static_cast<int16_t>(pill.y + pill.h / 2), 1);
 
+    const Rect pingButton = gatewayPingButtonRect(contentTop, width);
+    tft_.fillRoundRect(pingButton.x, pingButton.y, pingButton.w, pingButton.h, static_cast<int16_t>(pingButton.h / 2),
+                       th.accent);
+    tft_.setTextDatum(MC_DATUM);
+    tft_.setTextColor(th.accentText, th.accent);
+    tft_.drawString("PING", static_cast<int16_t>(pingButton.x + pingButton.w / 2),
+                    static_cast<int16_t>(pingButton.y + pingButton.h / 2), 1);
+
     const int16_t statsY = static_cast<int16_t>(pill.y + pill.h + 6);
     const auto tiles = gatewayStatTiles(width, statsY);
     const std::array<std::pair<std::string, const char*>, 3> stats = {{
@@ -1443,10 +1498,14 @@ void BarcodeApplication::drawGateway() {
         const auto& peer = link.peers[shown];
         tft_.setTextDatum(TL_DATUM);
         tft_.setTextColor(th.text, th.surface);
-        tft_.drawString(formatMac(peer.mac).c_str(), static_cast<int16_t>(peersCard.x + 8), static_cast<int16_t>(y + 2), 1);
+        const std::string label =
+            peer.deviceId[0] != '\0' ? std::string(peer.deviceIdCStr()) : formatMac(peer.mac);
+        tft_.drawString(label.c_str(), static_cast<int16_t>(peersCard.x + 8), static_cast<int16_t>(y + 2), 1);
         tft_.setTextDatum(TR_DATUM);
         tft_.setTextColor(th.textMuted, th.surface);
-        tft_.drawString(formatAgeSeconds(link.nowMs, peer.lastSeenMs).c_str(), static_cast<int16_t>(peersCard.x + peersCard.w - 8), static_cast<int16_t>(y + 2), 1);
+        std::string right = formatAgeSeconds(link.nowMs, peer.lastSeenMs);
+        if (peer.everPinged) right += " ~" + std::to_string(peer.lastRttMs) + "ms";
+        tft_.drawString(right.c_str(), static_cast<int16_t>(peersCard.x + peersCard.w - 8), static_cast<int16_t>(y + 2), 1);
         y = static_cast<int16_t>(y + peerRowH);
     }
     if (link.peerCount == 0) {
@@ -1476,6 +1535,11 @@ void BarcodeApplication::handleGatewayTouch(uint16_t x, uint16_t y) {
     const uint16_t height = tft_.height();
     if (gatewayRestartButtonRect(width, height).contains(x, y, kTouchPad)) {
         rebootDevice();
+        return;
+    }
+    const int16_t contentTop = subHeaderHeight(width, height);
+    if (gatewayPingButtonRect(contentTop, width).contains(x, y, kTouchPad)) {
+        gatewayPingRequested_ = true;
     }
 }
 

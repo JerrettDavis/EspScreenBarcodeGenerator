@@ -17,3 +17,15 @@ Feature: Gateway relay control
     And I set the relay data to "GATEWAY-001" for that device
     And I click Generate via Relay for that device
     Then the relay reports a successful generate result
+
+  Scenario: Pinging for prospective clients discovers a peer
+    Given I put the first device into gateway mode
+    When I open the Gateway page
+    And I click "Ping for Clients" for that device
+    Then the Gateway page lists a discovered peer for that device
+
+  Scenario: Refreshing the peers list shows no peers before any ping
+    Given I put the first device into gateway mode
+    When I open the Gateway page
+    And I click "Refresh Peers" for that device
+    Then the Gateway page shows no discovered peers for that device

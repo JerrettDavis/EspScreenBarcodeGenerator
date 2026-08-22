@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "ApplicationPorts.h"
 #include "DeviceConfigStore.h"
 #include "EspBarcodeCore.h"
 #include "GatewayRelay.h"
@@ -37,6 +38,13 @@ public:
     // button to the live stats screen) -- mirrors GatewayRelay's one-way mode switch in main.cpp.
     void enterGatewayMode();
     void updateGatewayStats(const esplink::GatewayRelay::Stats& stats);
+    // Fed every loop() iteration while this board is NOT in gateway relay mode (i.e. it's
+    // running its own EspNowEndpoint, possibly discovering a nearby gateway) -- see main.cpp.
+    void updateGatewayLinkStatus(const esplink::GatewayLinkInfo& status);
+    // True (once) if the on-device "Ping Now" button on the Gateway stats screen was tapped
+    // since the last call -- main.cpp polls this each loop() iteration, same pattern as
+    // SerialLegacyEndpoint::gatewayRequested().
+    bool consumeGatewayPingRequest();
     void setOrientation(esplink::OrientationTarget target, esplink::ScreenOrientation value);
     esplink::ScreenOrientation barcodeOrientation() const { return config_.barcodeOrientation(); }
     esplink::ScreenOrientation editorOrientation() const { return config_.editorOrientation(); }
@@ -136,4 +144,9 @@ private:
     bool gatewayModeActive_ = false;
     esplink::GatewayRelay::Stats gatewayStats_{};
     uint32_t gatewayStatsRedrawAt_ = 0;
+    bool gatewayPingRequested_ = false;
+
+    // This board's own gateway-discovery state (client role) -- see updateGatewayLinkStatus.
+    esplink::GatewayLinkInfo gatewayLinkStatus_{};
+    uint32_t gatewayLinkRedrawAt_ = 0;
 };

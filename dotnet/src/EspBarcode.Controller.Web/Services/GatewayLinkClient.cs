@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 using System.Text.Json.Nodes;
 using EspBarcode.Connectivity.Client;
@@ -26,13 +27,18 @@ public sealed class GatewayLinkClient : IAsyncDisposable
         _controlSession.Start();
     }
 
-    private async Task<JsonObject> SendAsync(
+    private Task<JsonObject> SendAsync(
         string name, JsonObject? body, uint controlSessionId, TimeSpan timeout, CancellationToken cancellationToken)
+        => SendAsync(ServiceId.System, name, body, controlSessionId, timeout, cancellationToken);
+
+    private async Task<JsonObject> SendAsync(
+        ServiceId serviceId, string name, JsonObject? body, uint controlSessionId, TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
         var wrapper = new JsonObject { ["schema"] = Schema, ["name"] = name, ["body"] = body ?? new JsonObject() };
         var bytes = Encoding.UTF8.GetBytes(wrapper.ToJsonString());
         var (envelope, respBytes) = await _controlSession.SendCommandAsync(
-            ServiceId.System, bytes, controlSessionId, timeout, cancellationToken);
+            serviceId, bytes, controlSessionId, timeout, cancellationToken);
 
         var respText = Encoding.UTF8.GetString(respBytes);
         if (JsonNode.Parse(respText) is not JsonObject respWrapper)
@@ -91,6 +97,33 @@ public sealed class GatewayLinkClient : IAsyncDisposable
             r["linear"]!.GetValue<bool>(), r["quiet"]!.GetValue<int>(), r["displayed"]!.GetValue<bool>(),
             r["normalized_data"]!.GetValue<string>());
     }
+
+    /// <summary>
+    /// Asks the gateway board itself (not the far-side relayed display) for its live ESP-NOW
+    /// peer list — <c>gateway.peers.list</c>, answered locally by GatewayRelay without crossing
+    /// the relay (see <c>GatewayRelay::handleGatewayServiceFromUsb</c>).
+    /// </summary>
+    public async Task<IReadOnlyList<GatewayPeer>> ListPeersAsync(
+        TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        var body = await SendAsync(
+            ServiceId.Gateway, "gateway.peers.list", null, controlSessionId: 0,
+            timeout ?? TimeSpan.FromSeconds(5), cancellationToken);
+        var peers = body["peers"]?.AsArray() ?? [];
+        return peers.Select(p =>
+        {
+            var o = p!.AsObject();
+            return new GatewayPeer(
+                o["mac"]!.GetValue<string>(), o["last_seen_ms_ago"]!.GetValue<long>(),
+                o["via_relay"]!.GetValue<bool>(), o["via_ping"]!.GetValue<bool>(),
+                o["rtt_ms"]?.GetValue<long>(), o["device_id"]?.GetValue<string>());
+        }).ToArray();
+    }
+
+    /// <summary>Triggers an immediate <c>gateway.link.ping</c> ESP-NOW broadcast — <c>gateway.ping.now</c>.</summary>
+    public Task PingNowAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        => SendAsync(ServiceId.Gateway, "gateway.ping.now", null, controlSessionId: 0,
+            timeout ?? TimeSpan.FromSeconds(5), cancellationToken);
 
     public ValueTask DisposeAsync() => _controlSession.DisposeAsync();
 }

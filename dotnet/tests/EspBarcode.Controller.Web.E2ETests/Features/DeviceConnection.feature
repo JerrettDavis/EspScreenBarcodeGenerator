@@ -25,3 +25,8 @@ Feature: Device connection
     When I reconnect known devices
     And I disconnect the first device
     Then the device list shows 1 connected device
+
+  Scenario: A plain client device shows its ESP-NOW gateway-discovery status
+    When I reconnect known devices
+    And I refresh the first device
+    Then the device list shows a gateway link status of "searching" for the first device

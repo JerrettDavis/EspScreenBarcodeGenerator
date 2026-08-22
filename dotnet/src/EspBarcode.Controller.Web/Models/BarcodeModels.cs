@@ -79,7 +79,23 @@ public sealed record GenerateResult(
 
 public sealed record DeviceInfo(string Device, string Firmware, string Protocol, string Transport, int ScreenWidth, int ScreenHeight);
 
-public sealed record StatusInfo(bool BarcodeVisible, bool HasCurrent, bool CurrentRaw, string Status, long FreeHeap);
+public sealed record StatusInfo(
+    bool BarcodeVisible, bool HasCurrent, bool CurrentRaw, string Status, long FreeHeap,
+    GatewayLinkStatus? GatewayLink = null);
+
+/// <summary>
+/// A plain client board's own view of ESP-NOW gateway discovery (docs/PROTOCOL_V2.md §10's
+/// "gateway.link.ping"/"gateway.link.pong") — present on <see cref="StatusInfo"/> only for
+/// boards running EspNowEndpoint's probe (i.e. not themselves switched into gateway relay mode).
+/// </summary>
+public sealed record GatewayLinkStatus(bool Connected, long AgeMs, long RttMs, string GatewayId);
+
+/// <summary>
+/// One ESP-NOW peer a gateway-mode board has observed, either by relaying real traffic for it
+/// or by discovery ping/pong — see <c>GatewayLinkClient.ListPeersAsync</c>.
+/// </summary>
+public sealed record GatewayPeer(
+    string Mac, long LastSeenMsAgo, bool ViaRelay, bool ViaPing, long? RttMs, string? DeviceId);
 
 public sealed record DownloadedMatrix(int Width, int Height, bool Linear, bool Invert, string Label, byte[] Packed);
 

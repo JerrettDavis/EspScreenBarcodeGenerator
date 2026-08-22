@@ -29,7 +29,14 @@ namespace esplink {
 // callback runs on the Wi-Fi/ESP-NOW task, not the Arduino loop task: it only copies bytes
 // into a bounded, statically-sized queue — no parsing, allocation, or engine dispatch
 // happens there. `loop()` drains that queue on the main task.
-class EspNowEndpoint : public IControlResponseSink {
+//
+// Also owns this board's half of the gateway-discovery ping/pong (ServiceId::Gateway,
+// "gateway.link.ping"/"gateway.link.pong", docs/PROTOCOL_V2.md §10): while this endpoint is
+// running (i.e. the board has NOT been switched into gateway relay mode), it periodically
+// broadcasts a "looking for a gateway" ping if it hasn't heard one recently, and always
+// answers any gateway-originated ping with a pong carrying its own identity. See
+// GatewayRelay for the gateway-side half of the same exchange.
+class EspNowEndpoint : public IControlResponseSink, public IGatewayLinkStatusSource {
 public:
     EspNowEndpoint(ControlProtocolEngine& engine, ControlSession& session, const IBarcodeDevice& device);
 
@@ -54,6 +61,10 @@ public:
     // Called from the ESP-NOW receive callback (Wi-Fi task context). Bounded, allocation-free.
     void enqueueReceived(const uint8_t* mac, const uint8_t* data, std::size_t length);
 
+    // IGatewayLinkStatusSource — surfaced through the ordinary `status` command
+    // (see ControlProtocolEngine::setGatewayLinkStatusSource).
+    GatewayLinkInfo gatewayLinkStatus() const override;
+
 private:
     struct RxDatagram {
         std::array<uint8_t, kMaxDatagramBytes> bytes{};
@@ -64,6 +75,12 @@ private:
     void processMessage(const MessageEnvelope& envelope, const std::vector<uint8_t>& body);
     void sendEnvelope(MessageKind kind, ServiceId serviceId, const std::vector<uint8_t>& bodyBytes,
                       uint64_t correlationId);
+
+    // The gateway-discovery ping/pong side channel — handled independently of the ordinary
+    // command dispatch path above (it's Event-kind, not Command, and needs no ControlSession).
+    void handleGatewayLinkMessage(JsonObjectConst wrapper);
+    void maybeSendGatewayProbe();
+    void sendGatewayLinkEvent(const char* eventName, uint32_t echoTs);
 
     static const char* mapV2Name(const std::string& name);
 
@@ -77,6 +94,16 @@ private:
     uint64_t nextResponseOperationId_ = 1;
     uint64_t currentRequestOperationId_ = 0;
     std::string currentRequestName_;
+
+    // Gateway-discovery state (this board's "client" role) — see the class comment above.
+    static constexpr uint32_t kGatewayProbeIntervalMs = 3000;    // while not connected
+    static constexpr uint32_t kGatewayKeepaliveIntervalMs = 8000; // while connected, to confirm liveness
+    static constexpr uint32_t kGatewayLinkTimeoutMs = 6000;
+    uint32_t lastGatewaySeenMs_ = 0;   // millis() of the last gateway ping/pong seen; 0 = never
+    uint32_t lastGatewayRttMs_ = 0;
+    std::string lastGatewayId_;
+    uint32_t lastProbeSentMs_ = 0;
+    uint32_t lastProbeTs_ = 0;         // the `ts` this board embedded in its most recent probe
 
     // Fixed-capacity ring buffer filled by the ESP-NOW receive callback, drained by loop().
     // A full queue drops the newest datagram rather than growing — bounded memory per

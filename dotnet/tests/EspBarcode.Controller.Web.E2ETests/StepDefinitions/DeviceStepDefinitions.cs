@@ -53,6 +53,22 @@ public class DeviceStepDefinitions(TestWorld world)
         await Task.Delay(200);
     }
 
+    [When("I refresh the first device")]
+    public async Task WhenIRefreshFirstDevice()
+    {
+        await GotoDevicesAsync();
+        await Page.Locator("[data-testid=device-card]").First.GetByText("Refresh", new LocatorGetByTextOptions { Exact = true }).ClickAsync();
+        await Task.Delay(200);
+    }
+
+    [Then("the device list shows a gateway link status of {string} for the first device")]
+    public async Task ThenGatewayLinkStatusShows(string expected)
+    {
+        await GotoDevicesAsync();
+        var status = Page.Locator("[data-testid=device-card]").First.Locator("[data-testid=gateway-link-status]");
+        await Assertions.Expect(status).ToContainTextAsync(expected, new LocatorAssertionsToContainTextOptions { IgnoreCase = true });
+    }
+
     [Then("the device list shows {int} connected device(s)")]
     public async Task ThenDeviceListShowsCount(int count)
     {

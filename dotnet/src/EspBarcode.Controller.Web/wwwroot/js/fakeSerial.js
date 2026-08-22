@@ -136,6 +136,8 @@
         if (bytes.length - 32 < bodyLength) return null;
         return {
             kind: bytes[4],
+            serviceId: bytes[6],
+            controlSessionId: view.getUint32(8, true),
             operationId: Number(view.getBigUint64(16, true)),
             body: bytes.slice(32, 32 + bodyLength),
         };
@@ -166,6 +168,12 @@
             this.backlightOn = true;
             this._v1Bytes = [];
             this._relayBlock = [];
+            // Gateway-discovery emulation (docs/PROTOCOL_V2.md §10's gateway.link.ping/pong):
+            // `gatewayLink` is this board's own ESP-NOW discovery state, surfaced via `status`
+            // (see EspNowEndpoint::gatewayLinkStatus in the real firmware); `_peers` is what a
+            // gateway-mode board answers `gateway.peers.list` with.
+            this.gatewayLink = config?.gatewayLink ?? { connected: false, age_ms: 0, rtt_ms: 0, gateway_id: "" };
+            this._peers = (config?.gatewayPeers ?? []).map((p) => ({ ...p }));
             this._buildStreams();
         }
 
@@ -251,6 +259,7 @@
                         current_raw: false,
                         status: this.current ? "displaying" : "idle",
                         free_heap: 182000,
+                        gateway_link: this.gatewayLink,
                     });
                     break;
                 case "generate": {
@@ -361,8 +370,31 @@
             let isError = false;
             let responseName = name;
             let responseBody = {};
+            let responseServiceId = envelope.serviceId ?? 0;
 
-            if (name === "system.hello" || name === "system.ping") {
+            if (envelope.serviceId === 7) {
+                // ServiceId::Gateway -- answered locally, mirroring GatewayRelay's
+                // handleGatewayServiceFromUsb (never forwarded to the "far side").
+                if (name === "gateway.peers.list") {
+                    responseBody = { peers: this._peers };
+                } else if (name === "gateway.ping.now") {
+                    // Simulate an immediate pong from a prospective client -- the real gateway's
+                    // reply is asynchronous (Gateway.razor waits ~1.2s before re-listing), but a
+                    // deterministic fake doesn't need that latency to exercise the same UI path.
+                    const mac = "AA:BB:CC:DD:EE:01";
+                    let peer = this._peers.find((p) => p.mac === mac);
+                    if (!peer) {
+                        peer = { mac, last_seen_ms_ago: 0, via_relay: false, via_ping: false, rtt_ms: 0, device_id: "esbg-fake-client" };
+                        this._peers.push(peer);
+                    }
+                    peer.last_seen_ms_ago = 0;
+                    peer.via_ping = true;
+                    peer.rtt_ms = 18;
+                    responseBody = { ok: true };
+                } else {
+                    isError = true;
+                }
+            } else if (name === "system.hello" || name === "system.ping") {
                 responseName = "system.welcome";
                 this._gatewayControlSessionId = (this._gatewayControlSessionId ?? 0) + 1;
                 responseBody = {
@@ -391,7 +423,8 @@
             const bodyBytes = new TextEncoder().encode(JSON.stringify(respWrapper));
             this._respOpCounter = (this._respOpCounter ?? 0) + 1;
             const envelopeBytes = encodeEnvelope({
-                kind: isError ? 3 : 1, controlSessionId: this._gatewayControlSessionId ?? 0,
+                kind: isError ? 3 : 1, serviceId: responseServiceId,
+                controlSessionId: envelope.serviceId === 7 ? envelope.controlSessionId : (this._gatewayControlSessionId ?? 0),
                 operationId: this._respOpCounter, correlationId: envelope.operationId, body: bodyBytes,
             });
             this._respLinkMsgCounter = (this._respLinkMsgCounter ?? 0) + 1;

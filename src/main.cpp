@@ -62,6 +62,7 @@ void setup() {
     } else {
         Serial.printf("{\"event\":\"espnow_error\",\"message\":\"%s\"}\n", espNowError.c_str());
     }
+    engine.setGatewayLinkStatusSource(&espNowEndpoint);
 
     std::string bleError;
     if (bleEndpoint.begin("EspScreenBarcodeGenerator", bleError)) {
@@ -80,7 +81,7 @@ void loop() {
         legacyEndpoint.loop();
         if (legacyEndpoint.gatewayRequested()) {
             active = ActiveTransport::GatewayRelayMode;
-            gatewayRelay.begin();  // takes over the ESP-NOW recv callback from espNowEndpoint
+            gatewayRelay.begin(espNowEndpoint.macAddress());  // takes over the ESP-NOW recv callback
             application.enterGatewayMode();
         } else if (legacyEndpoint.upgradeRequested()) {
             active = ActiveTransport::CobsV2;
@@ -89,11 +90,15 @@ void loop() {
         cobsEndpoint.loop();
     } else {
         gatewayRelay.loop();
+        if (application.consumeGatewayPingRequest()) gatewayRelay.pingNow();
         application.updateGatewayStats(gatewayRelay.stats());
     }
     // GatewayRelayMode owns the ESP-NOW receive callback itself (see above); espNowEndpoint's
     // own loop() would just drain an empty queue, but skip it anyway for clarity.
-    if (active != ActiveTransport::GatewayRelayMode) espNowEndpoint.loop();
+    if (active != ActiveTransport::GatewayRelayMode) {
+        espNowEndpoint.loop();
+        application.updateGatewayLinkStatus(espNowEndpoint.gatewayLinkStatus());
+    }
     bleEndpoint.loop();
     wifiDirectEndpoint.loop();
     application.loop();

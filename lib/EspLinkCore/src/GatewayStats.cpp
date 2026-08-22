@@ -1,30 +1,48 @@
 #include "GatewayStats.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace esplink {
 
-void GatewayStats::recordPeerSeen(const uint8_t mac[6], uint32_t nowMs) {
+std::size_t GatewayStats::findOrCreatePeerIndex(const uint8_t mac[6], uint32_t nowMs) {
     for (std::size_t i = 0; i < peerCount_; ++i) {
-        if (std::memcmp(peers_[i].mac.data(), mac, peers_[i].mac.size()) == 0) {
-            peers_[i].lastSeenMs = nowMs;
-            return;
-        }
+        if (std::memcmp(peers_[i].mac.data(), mac, peers_[i].mac.size()) == 0) return i;
     }
 
     if (peerCount_ < kMaxPeers) {
-        std::memcpy(peers_[peerCount_].mac.data(), mac, peers_[peerCount_].mac.size());
-        peers_[peerCount_].lastSeenMs = nowMs;
-        ++peerCount_;
-        return;
+        const std::size_t index = peerCount_++;
+        peers_[index] = Peer{};
+        std::memcpy(peers_[index].mac.data(), mac, peers_[index].mac.size());
+        peers_[index].lastSeenMs = nowMs;
+        return index;
     }
 
     std::size_t oldestIndex = 0;
     for (std::size_t i = 1; i < peerCount_; ++i) {
         if (peers_[i].lastSeenMs < peers_[oldestIndex].lastSeenMs) oldestIndex = i;
     }
+    peers_[oldestIndex] = Peer{};
     std::memcpy(peers_[oldestIndex].mac.data(), mac, peers_[oldestIndex].mac.size());
     peers_[oldestIndex].lastSeenMs = nowMs;
+    return oldestIndex;
+}
+
+void GatewayStats::recordPeerSeen(const uint8_t mac[6], uint32_t nowMs) {
+    const std::size_t index = findOrCreatePeerIndex(mac, nowMs);
+    peers_[index].lastSeenMs = nowMs;
+    peers_[index].everRelayed = true;
+}
+
+void GatewayStats::recordDiscoveryPong(const uint8_t mac[6], uint32_t nowMs, uint32_t rttMs, const char* deviceId) {
+    const std::size_t index = findOrCreatePeerIndex(mac, nowMs);
+    Peer& peer = peers_[index];
+    peer.lastSeenMs = nowMs;
+    peer.everPinged = true;
+    peer.lastRttMs = rttMs;
+    const std::size_t len = std::min(std::strlen(deviceId), kMaxDeviceIdLen);
+    std::memcpy(peer.deviceId.data(), deviceId, len);
+    peer.deviceId[len] = '\0';
 }
 
 void GatewayStats::recordHostActivity(uint32_t nowMs) {
