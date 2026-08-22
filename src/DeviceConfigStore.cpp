@@ -40,6 +40,7 @@ bool DeviceConfigStore::load() {
 
     barcodeOrientation_ = barcode;
     editorOrientation_ = editor;
+    darkTheme_ = document["dark_theme"] | true;
     return true;
 }
 
@@ -48,6 +49,7 @@ bool DeviceConfigStore::save(std::string& error) const {
     document["schema"] = 1;
     document["barcode_orientation"] = static_cast<int>(barcodeOrientation_);
     document["editor_orientation"] = static_cast<int>(editorOrientation_);
+    document["dark_theme"] = darkTheme_;
 
     File file = LittleFS.open(kConfigPath, "w");
     if (!file) {
@@ -72,6 +74,16 @@ bool DeviceConfigStore::setOrientation(OrientationTarget target, ScreenOrientati
     if (!save(error)) {
         barcodeOrientation_ = previousBarcode;
         editorOrientation_ = previousEditor;
+        return false;
+    }
+    return true;
+}
+
+bool DeviceConfigStore::setDarkTheme(bool value, std::string& error) {
+    const bool previous = darkTheme_;
+    darkTheme_ = value;
+    if (!save(error)) {
+        darkTheme_ = previous;
         return false;
     }
     return true;

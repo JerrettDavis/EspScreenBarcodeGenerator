@@ -1,0 +1,39 @@
+#pragma once
+
+#include <cstdint>
+
+namespace uigeom {
+
+// Converts 8-bit-per-channel RGB into the panel's native RGB565 format.
+constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
+    return static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+struct Theme {
+    uint16_t bg;
+    uint16_t surface;
+    uint16_t surfaceAlt;
+    uint16_t hairline;
+    uint16_t text;
+    uint16_t textMuted;
+    uint16_t textFaint;
+    uint16_t accent;
+    uint16_t accentText;
+    uint16_t danger;
+};
+
+constexpr Theme kDarkTheme{
+    rgb565(0x0B, 0x0C, 0x0E), rgb565(0x13, 0x15, 0x19), rgb565(0x1B, 0x1E, 0x23), rgb565(0x26, 0x2A, 0x30),
+    rgb565(0xF5, 0xF6, 0xF7), rgb565(0x90, 0x98, 0xA0), rgb565(0x6B, 0x71, 0x78),
+    rgb565(0x2D, 0xD9, 0xC6), rgb565(0x04, 0x20, 0x1C), rgb565(0xFF, 0x54, 0x49),
+};
+
+constexpr Theme kLightTheme{
+    rgb565(0xF4, 0xF5, 0xF6), rgb565(0xFF, 0xFF, 0xFF), rgb565(0xEC, 0xED, 0xEF), rgb565(0xDE, 0xE0, 0xE3),
+    rgb565(0x16, 0x18, 0x1B), rgb565(0x6B, 0x70, 0x78), rgb565(0x8A, 0x8F, 0x96),
+    rgb565(0x0C, 0x8C, 0x82), rgb565(0xFF, 0xFF, 0xFF), rgb565(0xD9, 0x2D, 0x20),
+};
+
+inline const Theme& themeFor(bool dark) { return dark ? kDarkTheme : kLightTheme; }
+
+}  // namespace uigeom

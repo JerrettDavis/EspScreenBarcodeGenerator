@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
@@ -16,19 +17,12 @@
 using namespace espbarcode;
 using esplink::OrientationTarget;
 using esplink::ScreenOrientation;
+using uigeom::Theme;
 
 namespace {
-constexpr uint16_t kBackground = TFT_BLACK;
-constexpr uint16_t kPanel = 0x2104;
-constexpr uint16_t kPanelAlt = 0x3186;
-constexpr uint16_t kAccent = 0x05FF;
-constexpr uint16_t kAccentDark = 0x0355;
-constexpr uint16_t kWarning = 0xFD20;
-constexpr uint16_t kDanger = 0xF904;
-constexpr uint16_t kText = TFT_WHITE;
-constexpr uint16_t kMuted = 0xBDF7;
-// Extra hit-test tolerance for the home screen's small, tightly-packed
-// buttons (e.g. CLEAR is only 70px wide with 8px gaps on either side).
+// Extra hit-test tolerance for small, tightly-packed touch targets (icon
+// buttons, switches, list rows) -- resistive-touch calibration always has a
+// few pixels of slop.
 constexpr int16_t kTouchPad = 4;
 
 using Rect = uigeom::Rect;
@@ -67,75 +61,210 @@ const char* orientationLabel(ScreenOrientation orientation) {
 }
 
 // ---------------------------------------------------------------------------
+// Icon vocabulary. Every icon is a small stroke-based glyph drawn with plain
+// TFT_eSPI primitives (drawWideLine gives a clean ~1.6px anti-aliased stroke)
+// centered on (cx, cy) within a ~14-16px box. `bg` is the color the icon sits
+// on -- drawWideLine anti-aliases by blending against it, so it must match
+// whatever was just filled at that spot.
+// ---------------------------------------------------------------------------
+
+void wl(TFT_eSPI& g, float x0, float y0, float x1, float y1, uint16_t color, uint16_t bg) {
+    g.drawWideLine(x0, y0, x1, y1, 1.6f, color, bg);
+}
+
+void iconBarcode(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t /*bg*/) {
+    const int16_t widths[5] = {1, 2, 1, 2, 1};
+    int16_t x = static_cast<int16_t>(cx - 6);
+    const int16_t y = static_cast<int16_t>(cy - 6);
+    for (int16_t w : widths) {
+        g.fillRect(x, y, w, 12, c);
+        x = static_cast<int16_t>(x + w + 1);
+    }
+}
+
+void iconChevronDown(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    wl(g, cx - 4, cy - 2, cx, cy + 2, c, bg);
+    wl(g, cx, cy + 2, cx + 4, cy - 2, c, bg);
+}
+
+void iconChevronLeft(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    wl(g, cx + 2, cy - 4, cx - 2, cy, c, bg);
+    wl(g, cx - 2, cy, cx + 2, cy + 4, c, bg);
+}
+
+void iconChevronRight(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    wl(g, cx - 2, cy - 4, cx + 2, cy, c, bg);
+    wl(g, cx + 2, cy, cx - 2, cy + 4, c, bg);
+}
+
+void iconBookmark(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    const int16_t x0 = static_cast<int16_t>(cx - 5), x1 = static_cast<int16_t>(cx + 5);
+    const int16_t y0 = static_cast<int16_t>(cy - 6), yb = static_cast<int16_t>(cy + 5);
+    wl(g, x0, y0, x1, y0, c, bg);
+    wl(g, x0, y0, x0, yb, c, bg);
+    wl(g, x1, y0, x1, yb, c, bg);
+    wl(g, x0, yb, cx, cy + 1, c, bg);
+    wl(g, cx, cy + 1, x1, yb, c, bg);
+}
+
+void iconSliders(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    const int16_t x0 = static_cast<int16_t>(cx - 6), x1 = static_cast<int16_t>(cx + 6);
+    const int16_t ys[3] = {static_cast<int16_t>(cy - 4), cy, static_cast<int16_t>(cy + 4)};
+    const int16_t knob[3] = {static_cast<int16_t>(cx - 2), static_cast<int16_t>(cx + 3), static_cast<int16_t>(cx - 4)};
+    for (int i = 0; i < 3; ++i) {
+        wl(g, x0, ys[i], x1, ys[i], c, bg);
+        g.fillCircle(knob[i], ys[i], 2, c);
+    }
+}
+
+void iconList(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    const int16_t x0 = static_cast<int16_t>(cx - 6), x1 = static_cast<int16_t>(cx + 6);
+    const int16_t ys[3] = {static_cast<int16_t>(cy - 4), cy, static_cast<int16_t>(cy + 4)};
+    for (int i = 0; i < 3; ++i) wl(g, x0, ys[i], i == 2 ? static_cast<int16_t>(cx + 1) : x1, ys[i], c, bg);
+}
+
+void iconEye(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t /*bg*/) {
+    g.drawEllipse(cx, cy, 7, 4, c);
+    g.fillCircle(cx, cy, 2, c);
+}
+
+void iconShuffle(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    wl(g, cx - 6, cy - 4, cx + 3, cy + 4, c, bg);
+    wl(g, cx - 6, cy + 4, cx + 3, cy - 4, c, bg);
+    wl(g, cx + 3, cy + 4, cx + 6, cy + 4, c, bg);
+    wl(g, cx + 3, cy - 4, cx + 6, cy - 4, c, bg);
+}
+
+void iconGear(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    g.drawCircle(cx, cy, 4, c);
+    for (int i = 0; i < 8; ++i) {
+        const float a = static_cast<float>(i) * 3.14159265f / 4.0f;
+        const int16_t x0 = static_cast<int16_t>(static_cast<float>(cx) + cosf(a) * 5.0f);
+        const int16_t y0 = static_cast<int16_t>(static_cast<float>(cy) + sinf(a) * 5.0f);
+        const int16_t x1 = static_cast<int16_t>(static_cast<float>(cx) + cosf(a) * 7.0f);
+        const int16_t y1 = static_cast<int16_t>(static_cast<float>(cy) + sinf(a) * 7.0f);
+        wl(g, x0, y0, x1, y1, c, bg);
+    }
+}
+
+void iconSun(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    g.drawCircle(cx, cy, 3, c);
+    for (int i = 0; i < 8; ++i) {
+        const float a = static_cast<float>(i) * 3.14159265f / 4.0f;
+        const int16_t x0 = static_cast<int16_t>(static_cast<float>(cx) + cosf(a) * 5.0f);
+        const int16_t y0 = static_cast<int16_t>(static_cast<float>(cy) + sinf(a) * 5.0f);
+        const int16_t x1 = static_cast<int16_t>(static_cast<float>(cx) + cosf(a) * 7.0f);
+        const int16_t y1 = static_cast<int16_t>(static_cast<float>(cy) + sinf(a) * 7.0f);
+        wl(g, x0, y0, x1, y1, c, bg);
+    }
+}
+
+void iconMoon(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    g.fillCircle(cx, cy, 5, c);
+    g.fillCircle(static_cast<int16_t>(cx + 3), static_cast<int16_t>(cy - 2), 5, bg);
+}
+
+void iconClose(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    wl(g, cx - 5, cy - 5, cx + 5, cy + 5, c, bg);
+    wl(g, cx + 5, cy - 5, cx - 5, cy + 5, c, bg);
+}
+
+void iconBackspace(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    const int16_t x0 = static_cast<int16_t>(cx - 7), y0 = static_cast<int16_t>(cy - 5);
+    const int16_t x1 = static_cast<int16_t>(cx + 7), y1 = static_cast<int16_t>(cy + 5);
+    const int16_t px = static_cast<int16_t>(cx - 11);
+    wl(g, px, cy, x0, y0, c, bg);
+    wl(g, x0, y0, x1, y0, c, bg);
+    wl(g, x1, y0, x1, y1, c, bg);
+    wl(g, x1, y1, x0, y1, c, bg);
+    wl(g, x0, y1, px, cy, c, bg);
+    wl(g, cx - 2, cy - 3, cx + 3, cy + 3, c, bg);
+    wl(g, cx + 3, cy - 3, cx - 2, cy + 3, c, bg);
+}
+
+void iconRestart(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
+    g.drawCircle(cx, cy, 6, c);
+    g.drawCircle(cx, cy, 5, c);
+    g.fillTriangle(static_cast<int16_t>(cx + 4), static_cast<int16_t>(cy - 8),
+                   static_cast<int16_t>(cx + 9), static_cast<int16_t>(cy - 5),
+                   static_cast<int16_t>(cx + 3), static_cast<int16_t>(cy - 3), c);
+    (void)bg;
+}
+
+// ---------------------------------------------------------------------------
 // Editor screen layout. The editor (Home/TypePicker/Options/Presets/Settings/
 // keyboard) is user-orientable independent of the barcode display, so every
 // rect below is derived from the *current* screen dimensions rather than a
-// fixed 320x480 assumption. Portrait (width <= height) numbers reproduce the
-// original fixed layout exactly; landscape numbers are a fresh compact
-// layout sized for the shorter 480x320 footprint.
+// fixed 320x480 assumption. `wide` (landscape, 480x320) is the primary target;
+// portrait (320x480) gets a taller, more generously spaced variant of the
+// same layout.
 // ---------------------------------------------------------------------------
 
-// Evenly distributes `count` buttons across [margin, width-margin] at row y/h.
+// Evenly distributes `count` cells across [margin, width-margin] at row y/h.
 std::vector<Rect> distributeRow(uint16_t width, int16_t y, int16_t h, int count,
                                 int16_t margin = 8, int16_t gap = 8) {
     std::vector<Rect> rects;
     rects.reserve(static_cast<std::size_t>(count));
     const int totalGap = gap * (count - 1);
-    const int buttonWidth = (static_cast<int>(width) - 2 * margin - totalGap) / count;
+    const int cellWidth = (static_cast<int>(width) - 2 * margin - totalGap) / count;
     int16_t x = margin;
     for (int i = 0; i < count; ++i) {
-        rects.push_back(Rect{x, y, static_cast<int16_t>(buttonWidth), h});
-        x = static_cast<int16_t>(x + buttonWidth + gap);
+        rects.push_back(Rect{x, y, static_cast<int16_t>(cellWidth), h});
+        x = static_cast<int16_t>(x + cellWidth + gap);
     }
     return rects;
 }
 
-Rect homeTitleBarRect(uint16_t width, uint16_t height) {
-    return Rect{0, 0, static_cast<int16_t>(width), static_cast<int16_t>(height <= 320 ? 22 : 30)};
+// ---- Home top bar (symbology chip, byte count, save, theme toggle) ----
+
+int16_t homeTopBarHeight(uint16_t width, uint16_t height) { return width > height ? 26 : 30; }
+
+Rect homeToggleRect(uint16_t width, uint16_t height) {
+    const int16_t barH = homeTopBarHeight(width, height);
+    const int16_t sw = 42, sh = static_cast<int16_t>(barH - 6);
+    return Rect{static_cast<int16_t>(width - sw - 6), static_cast<int16_t>((barH - sh) / 2), sw, sh};
 }
 
-std::array<Rect, 3> homeTopRow(uint16_t width, uint16_t height) {
-    const bool wide = width > height;
-    const int16_t y = static_cast<int16_t>(wide ? 32 : 38);
-    const int16_t h = static_cast<int16_t>(wide ? 30 : 38);
-    if (!wide) return {Rect{8, y, 150, h}, Rect{166, y, 70, h}, Rect{244, y, 68, h}};
-    return {Rect{8, y, 260, h}, Rect{276, y, 96, h}, Rect{380, y, 88, h}};
+Rect homeSaveIconRect(uint16_t width, uint16_t height) {
+    const Rect toggle = homeToggleRect(width, height);
+    return Rect{static_cast<int16_t>(toggle.x - toggle.h - 6), toggle.y, toggle.h, toggle.h};
 }
+
+Rect homeChipRect(uint16_t width, uint16_t height) {
+    const int16_t barH = homeTopBarHeight(width, height);
+    const int16_t h = static_cast<int16_t>(barH - 4);
+    const int16_t w = static_cast<int16_t>(width > height ? 176 : 190);
+    return Rect{6, 2, w, h};
+}
+
+// ---- Data preview card ----
 
 Rect homeDataBoxRect(uint16_t width, uint16_t height) {
-    if (width <= height) return Rect{8, 82, 304, 88};
-    return Rect{8, 70, 460, 54};
+    const bool wide = width > height;
+    const int16_t top = static_cast<int16_t>(homeTopBarHeight(width, height) + 6);
+    return wide ? Rect{8, top, static_cast<int16_t>(width - 16), 50}
+                : Rect{8, top, static_cast<int16_t>(width - 16), 78};
 }
 
+Rect homeClearButtonRect(uint16_t width, uint16_t height) {
+    const Rect box = homeDataBoxRect(width, height);
+    return Rect{static_cast<int16_t>(box.x + box.w - 28), static_cast<int16_t>(box.y + box.h / 2 - 10), 20, 20};
+}
+
+// ---- Flat action row (OPTIONS / PRESETS / DISPLAY / RANDOM / SETTINGS) ----
+
 std::vector<Rect> homeActionRow(uint16_t width, uint16_t height) {
-    // OPTIONS / PRESETS / DISPLAY / RANDOM / SETTINGS
-    const Rect dataBox = homeDataBoxRect(width, height);
-    const int16_t y = static_cast<int16_t>(dataBox.y + dataBox.h + 6);
-    const int16_t h = static_cast<int16_t>(width > height ? 32 : 38);
-    return distributeRow(width, y, h, 5);
+    const Rect box = homeDataBoxRect(width, height);
+    const int16_t y = static_cast<int16_t>(box.y + box.h + 6);
+    const int16_t h = static_cast<int16_t>(width > height ? 40 : 46);
+    return distributeRow(width, y, h, 5, 8, 0);
 }
 
 Rect homeStatusRect(uint16_t width, uint16_t height) {
     const auto row = homeActionRow(width, height);
-    const int16_t y = static_cast<int16_t>(row.front().y + row.front().h + 3);
-    const int16_t h = static_cast<int16_t>(width > height ? 14 : 17);
+    const int16_t y = static_cast<int16_t>(row.front().y + row.front().h + 4);
+    const int16_t h = static_cast<int16_t>(width > height ? 12 : 16);
     return Rect{8, y, static_cast<int16_t>(width - 16), h};
-}
-
-// Gateway mode replaces the normal Home layout entirely (editing the barcode locally has no
-// purpose once this board is a pure USB<->ESP-NOW relay), so it gets its own single big button
-// rather than fighting the editor's action row for space.
-Rect homeGatewayButtonRect(uint16_t width, uint16_t height) {
-    const Rect title = homeTitleBarRect(width, height);
-    return Rect{8, static_cast<int16_t>(title.h + 28), static_cast<int16_t>(width - 16), 56};
-}
-
-// Gateway relay mode is a one-way switch (see main.cpp) -- the only in-device way back to the
-// normal ESP Barcode Lab screen is a restart, so this button is always reachable from Home
-// without first going through the stats screen.
-Rect homeGatewayRestartButtonRect(uint16_t width, uint16_t height) {
-    const Rect statsButton = homeGatewayButtonRect(width, height);
-    return Rect{statsButton.x, static_cast<int16_t>(statsButton.y + statsButton.h + 10), statsButton.w, 40};
 }
 
 struct KeyboardMetrics {
@@ -165,6 +294,136 @@ ControlRowLayout controlRowLayout(uint16_t width, int16_t y, int16_t h) {
         x = static_cast<int16_t>(x + widths[i] + 1);
     }
     return layout;
+}
+
+// ---- Shared subheader (back chevron + title + theme toggle) ----
+
+int16_t subHeaderHeight(uint16_t width, uint16_t height) { return width > height ? 28 : 32; }
+
+Rect subHeaderBackRect(uint16_t width, uint16_t height) {
+    const int16_t h = static_cast<int16_t>(subHeaderHeight(width, height) - 4);
+    return Rect{4, 2, h, h};
+}
+
+Rect subHeaderToggleRect(uint16_t width, uint16_t height) {
+    const int16_t barH = subHeaderHeight(width, height);
+    const int16_t sw = 42, sh = static_cast<int16_t>(barH - 8);
+    return Rect{static_cast<int16_t>(width - sw - 6), static_cast<int16_t>((barH - sh) / 2), sw, sh};
+}
+
+// ---- Gateway-mode Home banner ----
+
+int16_t gatewayBannerIconCy(uint16_t width, uint16_t height) {
+    const int16_t contentTop = subHeaderHeight(width, height);
+    return static_cast<int16_t>(contentTop + (height - contentTop) / 2 - 44);
+}
+
+std::array<Rect, 2> gatewayBannerButtons(uint16_t width, uint16_t height) {
+    const int16_t y = static_cast<int16_t>(gatewayBannerIconCy(width, height) + 26 + 54);
+    const int16_t gap = 10;
+    const int16_t btnW = static_cast<int16_t>((static_cast<int>(width) - 16 - gap) / 2);
+    return {Rect{8, y, btnW, 40}, Rect{static_cast<int16_t>(8 + btnW + gap), y, btnW, 40}};
+}
+
+// ---- TypePicker grid ----
+
+struct TypeGrid {
+    int columns;
+    int16_t left;
+    int16_t top;
+    int16_t cellW;
+    int16_t cellH;
+    int16_t colStride;
+    int16_t rowStride;
+};
+
+TypeGrid typeGridMetrics(uint16_t width, uint16_t height, int16_t contentTop, int count) {
+    const bool wide = width > height;
+    const int columns = wide ? 3 : 2;
+    const int rows = (count + columns - 1) / columns;
+    const int16_t gap = 6;
+    const int16_t left = 8;
+    const int16_t bottomMargin = 8;
+    const int16_t availW = static_cast<int16_t>(width - 2 * left - (columns - 1) * gap);
+    const int16_t cellW = static_cast<int16_t>(availW / columns);
+    const int16_t availH = static_cast<int16_t>(height - contentTop - bottomMargin);
+    const int16_t rowStride = static_cast<int16_t>(availH / rows);
+    const int16_t cellH = static_cast<int16_t>(rowStride - gap);
+    return TypeGrid{columns, left, contentTop, cellW, cellH,
+                    static_cast<int16_t>(cellW + gap), rowStride};
+}
+
+// ---- Options grouped list ----
+
+int16_t optionsFooterHeight(uint16_t width, uint16_t height) { return width > height ? 34 : 42; }
+
+Rect optionsListCardRect(uint16_t width, uint16_t height, int16_t contentTop, int16_t footerH) {
+    const int16_t y = static_cast<int16_t>(contentTop + 5);
+    const int16_t h = static_cast<int16_t>(height - y - footerH - 10);
+    return Rect{8, y, static_cast<int16_t>(width - 16), h};
+}
+
+Rect optionsDisplayButtonRect(uint16_t width, uint16_t height) {
+    const int16_t h = optionsFooterHeight(width, height);
+    return Rect{8, static_cast<int16_t>(height - h - 6), static_cast<int16_t>(width - 16), h};
+}
+
+// ---- Settings grouped list ----
+
+Rect settingsCardRect(uint16_t width, uint16_t height, int16_t contentTop) {
+    const int16_t y = static_cast<int16_t>(contentTop + 6);
+    const int16_t h = static_cast<int16_t>(std::min<int>(120, height - contentTop - 14));
+    return Rect{8, y, static_cast<int16_t>(width - 16), h};
+}
+
+// ---- Presets grouped list + footer ----
+
+int16_t presetsFooterHeight(uint16_t width, uint16_t height) { return width > height ? 36 : 44; }
+
+Rect presetsListCardRect(uint16_t width, uint16_t height, int16_t contentTop, int16_t footerH) {
+    const int16_t y = static_cast<int16_t>(contentTop + 5);
+    const int16_t h = static_cast<int16_t>(height - y - footerH - 10);
+    return Rect{8, y, static_cast<int16_t>(width - 16), h};
+}
+
+std::array<Rect, 3> presetsFooterButtons(uint16_t width, uint16_t height) {
+    const int16_t h = presetsFooterHeight(width, height);
+    const int16_t y = static_cast<int16_t>(height - h - 6);
+    const auto row = distributeRow(width, y, h, 3);
+    return {row[0], row[1], row[2]};
+}
+
+// ---- Gateway stats ----
+
+Rect gatewayStatusPillRect(int16_t contentTop) {
+    return Rect{8, static_cast<int16_t>(contentTop + 6), 170, 22};
+}
+
+std::array<Rect, 3> gatewayStatTiles(uint16_t width, int16_t y) {
+    const auto row = distributeRow(width, y, 40, 3, 8, 6);
+    return {row[0], row[1], row[2]};
+}
+
+Rect gatewayRestartButtonRect(uint16_t width, uint16_t height) {
+    return Rect{8, static_cast<int16_t>(height - 42), static_cast<int16_t>(width - 16), 34};
+}
+
+Rect gatewayPeersCardRect(uint16_t width, uint16_t height, int16_t statsY) {
+    const int16_t y = static_cast<int16_t>(statsY + 46);
+    const int16_t h = static_cast<int16_t>(height - y - 42 - 10);
+    return Rect{8, y, static_cast<int16_t>(width - 16), h};
+}
+
+std::string formatMac(const std::array<uint8_t, 6>& mac) {
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return buf;
+}
+
+std::string formatAgeSeconds(uint32_t nowMs, uint32_t lastSeenMs) {
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%lus ago", static_cast<unsigned long>((nowMs - lastSeenMs) / 1000));
+    return buf;
 }
 
 }  // namespace
@@ -199,6 +458,21 @@ std::string BarcodeApplication::displayName(Symbology type) {
     return "Unknown";
 }
 
+std::string BarcodeApplication::symbologyHint(Symbology type) {
+    switch (type) {
+        case Symbology::QrCode:
+        case Symbology::DataMatrix:
+        case Symbology::Aztec:
+            return "2D";
+        case Symbology::UpcA:
+        case Symbology::Ean13:
+        case Symbology::Ean8:
+            return "RETAIL";
+        default:
+            return "LINEAR";
+    }
+}
+
 bool BarcodeApplication::begin(std::string& error) {
     pinMode(app_config::kBacklightPin, OUTPUT);
     digitalWrite(app_config::kBacklightPin, HIGH);
@@ -209,7 +483,7 @@ bool BarcodeApplication::begin(std::string& error) {
     tft_.setRotation(static_cast<uint8_t>(appliedOrientation_));
     tft_.setTouch(const_cast<uint16_t*>(app_config::kTouchCalibration));
     tft_.setTextWrap(false, false);
-    tft_.fillScreen(kBackground);
+    tft_.fillScreen(theme().bg);
 
     if (!presets_.begin(error)) return false;
     spec_.type = Symbology::QrCode;
@@ -239,14 +513,27 @@ void BarcodeApplication::setOrientation(OrientationTarget target, ScreenOrientat
         }
         return;
     }
-    switch (view_) {
+    redrawView(view_);
+}
+
+void BarcodeApplication::toggleTheme() {
+    std::string error;
+    if (!config_.setDarkTheme(!config_.darkTheme(), error)) {
+        setStatus("Theme save failed: " + error, view_ == View::Home);
+        return;
+    }
+    redrawView(view_);
+}
+
+void BarcodeApplication::redrawView(View view) {
+    switch (view) {
         case View::Home: drawHome(); break;
         case View::TypePicker: drawTypePicker(); break;
         case View::Options: drawOptions(); break;
         case View::Presets: drawPresets(); break;
         case View::Settings: drawSettings(); break;
         case View::Gateway: drawGateway(); break;
-        case View::Barcode: break;
+        case View::Barcode: break;  // always white/black regardless of theme; nothing to restyle
     }
 }
 
@@ -339,12 +626,74 @@ void BarcodeApplication::drawButton(const Rect& rect,
                                     const std::string& text,
                                     bool selected,
                                     uint16_t fill) {
-    if (fill == 0) fill = selected ? kAccentDark : kPanel;
-    tft_.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 5, fill);
-    tft_.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 5, selected ? kAccent : kPanelAlt);
+    const Theme& th = theme();
+    if (fill == 0) fill = selected ? th.accent : th.surfaceAlt;
+    uint16_t textColor = th.text;
+    if (fill == th.accent) textColor = th.accentText;
+    else if (fill == th.danger) textColor = TFT_WHITE;
+    const uint16_t border = (fill == th.surfaceAlt || fill == th.surface) ? th.hairline : fill;
+    tft_.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 8, fill);
+    tft_.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 8, border);
     tft_.setTextDatum(MC_DATUM);
-    tft_.setTextColor(kText, fill);
+    tft_.setTextColor(textColor, fill);
     tft_.drawString(clipped(text, 19).c_str(), rect.x + rect.w / 2, rect.y + rect.h / 2, 2);
+}
+
+void BarcodeApplication::drawThemeSwitch(const Rect& rect) {
+    const Theme& th = theme();
+    const bool dark = config_.darkTheme();
+    tft_.fillRoundRect(rect.x, rect.y, rect.w, rect.h, rect.h / 2, th.surfaceAlt);
+    tft_.drawRoundRect(rect.x, rect.y, rect.w, rect.h, rect.h / 2, th.hairline);
+    iconSun(tft_, static_cast<int16_t>(rect.x + 8), static_cast<int16_t>(rect.y + rect.h / 2), th.textFaint, th.surfaceAlt);
+    iconMoon(tft_, static_cast<int16_t>(rect.x + rect.w - 8), static_cast<int16_t>(rect.y + rect.h / 2), th.textFaint, th.surfaceAlt);
+    const int16_t knobD = static_cast<int16_t>(rect.h - 4);
+    const int16_t knobCx = static_cast<int16_t>(dark ? rect.x + rect.w - knobD / 2 - 2 : rect.x + knobD / 2 + 2);
+    tft_.fillCircle(knobCx, static_cast<int16_t>(rect.y + rect.h / 2), knobD / 2, th.accent);
+}
+
+void BarcodeApplication::drawMiniSwitch(const Rect& rect, bool on) {
+    const Theme& th = theme();
+    const uint16_t track = on ? th.accent : th.surfaceAlt;
+    tft_.fillRoundRect(rect.x, rect.y, rect.w, rect.h, rect.h / 2, track);
+    tft_.drawRoundRect(rect.x, rect.y, rect.w, rect.h, rect.h / 2, on ? th.accent : th.hairline);
+    const int16_t knobD = static_cast<int16_t>(rect.h - 4);
+    const int16_t knobCx = static_cast<int16_t>(on ? rect.x + rect.w - knobD / 2 - 2 : rect.x + knobD / 2 + 2);
+    tft_.fillCircle(knobCx, static_cast<int16_t>(rect.y + rect.h / 2), knobD / 2, on ? TFT_WHITE : th.textMuted);
+}
+
+int16_t BarcodeApplication::drawSubHeader(const std::string& title, bool showBack) {
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const Theme& th = theme();
+    const int16_t h = subHeaderHeight(width, height);
+    tft_.fillRect(0, 0, width, h, th.bg);
+    int16_t textX = 10;
+    if (showBack) {
+        const Rect back = subHeaderBackRect(width, height);
+        iconChevronLeft(tft_, static_cast<int16_t>(back.x + back.w / 2), static_cast<int16_t>(back.y + back.h / 2),
+                        th.textMuted, th.bg);
+        textX = static_cast<int16_t>(back.x + back.w + 6);
+    }
+    tft_.setTextDatum(ML_DATUM);
+    tft_.setTextColor(th.text, th.bg);
+    tft_.drawString(title.c_str(), textX, static_cast<int16_t>(h / 2), 4);
+    drawThemeSwitch(subHeaderToggleRect(width, height));
+    return h;
+}
+
+bool BarcodeApplication::handleSubHeaderTouch(uint16_t x, uint16_t y, View backTarget, bool hasBack) {
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    if (hasBack && subHeaderBackRect(width, height).contains(x, y, kTouchPad)) {
+        view_ = backTarget;
+        redrawView(backTarget);
+        return true;
+    }
+    if (subHeaderToggleRect(width, height).contains(x, y, kTouchPad)) {
+        toggleTheme();
+        return true;
+    }
+    return false;
 }
 
 void BarcodeApplication::showHome(const std::string& status) {
@@ -381,82 +730,144 @@ void BarcodeApplication::drawHome() {
     applyOrientationForView(View::Home);
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
+    const Theme& th = theme();
 
-    tft_.fillScreen(kBackground);
-    const Rect title = homeTitleBarRect(width, height);
-    tft_.fillRect(title.x, title.y, title.w, title.h, kAccentDark);
-    tft_.setTextDatum(MC_DATUM);
-    tft_.setTextColor(kText, kAccentDark);
-    tft_.drawString(gatewayModeActive_ ? "GATEWAY MODE" : "ESP BARCODE LAB", width / 2, title.h / 2, 4);
+    tft_.fillScreen(th.bg);
 
     if (gatewayModeActive_) {
+        const int16_t h = homeTopBarHeight(width, height);
+        tft_.setTextDatum(MC_DATUM);
+        tft_.setTextColor(th.text, th.bg);
+        tft_.drawString("Gateway Mode", static_cast<int16_t>(width / 2), static_cast<int16_t>(h / 2), 4);
+        drawThemeSwitch(subHeaderToggleRect(width, height));
         drawGatewayHomeBanner();
         return;
     }
 
-    const auto topRow = homeTopRow(width, height);
-    drawButton(topRow[0], displayName(spec_.type), true);
-    drawButton(topRow[1], "CLEAR", false, kDanger);
-    drawButton(topRow[2], "SAVE", false, kPanelAlt);
+    const Rect chip = homeChipRect(width, height);
+    tft_.fillRoundRect(chip.x, chip.y, chip.w, chip.h, static_cast<int16_t>(chip.h / 2), th.surface);
+    tft_.drawRoundRect(chip.x, chip.y, chip.w, chip.h, static_cast<int16_t>(chip.h / 2), th.hairline);
+    iconBarcode(tft_, static_cast<int16_t>(chip.x + 15), static_cast<int16_t>(chip.y + chip.h / 2), th.textMuted, th.surface);
+    tft_.setTextDatum(ML_DATUM);
+    tft_.setTextColor(th.text, th.surface);
+    tft_.drawString(clipped(displayName(spec_.type), 15).c_str(), static_cast<int16_t>(chip.x + 28),
+                    static_cast<int16_t>(chip.y + chip.h / 2), 2);
+    iconChevronDown(tft_, static_cast<int16_t>(chip.x + chip.w - 12), static_cast<int16_t>(chip.y + chip.h / 2),
+                    th.textFaint, th.surface);
+
+    const Rect toggle = homeToggleRect(width, height);
+    drawThemeSwitch(toggle);
+    const Rect saveIcon = homeSaveIconRect(width, height);
+    tft_.fillRoundRect(saveIcon.x, saveIcon.y, saveIcon.w, saveIcon.h, 7, th.surface);
+    tft_.drawRoundRect(saveIcon.x, saveIcon.y, saveIcon.w, saveIcon.h, 7, th.hairline);
+    iconBookmark(tft_, static_cast<int16_t>(saveIcon.x + saveIcon.w / 2), static_cast<int16_t>(saveIcon.y + saveIcon.h / 2),
+                th.textMuted, th.surface);
+
+    char countBuf[16];
+    std::snprintf(countBuf, sizeof(countBuf), "%uB", static_cast<unsigned>(spec_.data.size()));
+    tft_.setTextDatum(MR_DATUM);
+    tft_.setTextColor(th.textMuted, th.bg);
+    tft_.drawString(countBuf, static_cast<int16_t>(saveIcon.x - 8), static_cast<int16_t>(toggle.y + toggle.h / 2), 1);
 
     const Rect dataBox = homeDataBoxRect(width, height);
-    tft_.fillRoundRect(dataBox.x, dataBox.y, dataBox.w, dataBox.h, 5, TFT_WHITE);
-    tft_.drawRoundRect(dataBox.x, dataBox.y, dataBox.w, dataBox.h, 5, kAccent);
+    tft_.fillRoundRect(dataBox.x, dataBox.y, dataBox.w, dataBox.h, 12, th.surface);
+    tft_.drawRoundRect(dataBox.x, dataBox.y, dataBox.w, dataBox.h, 12, th.hairline);
     drawDataPreview();
 
     const auto actionRow = homeActionRow(width, height);
-    drawButton(actionRow[0], "OPTIONS");
-    drawButton(actionRow[1], "PRESETS");
-    drawButton(actionRow[2], "DISPLAY", true, kAccentDark);
-    drawButton(actionRow[3], "RANDOM", false, kWarning);
-    drawButton(actionRow[4], "SETTINGS", false, kPanel);
+    static const char* labels[5] = {"OPTIONS", "PRESETS", "DISPLAY", "RANDOM", "SETTINGS"};
+    tft_.drawFastHLine(actionRow[0].x, actionRow[0].y, static_cast<int16_t>(width - 2 * actionRow[0].x), th.hairline);
+    tft_.drawFastHLine(actionRow[0].x, static_cast<int16_t>(actionRow[0].y + actionRow[0].h),
+                       static_cast<int16_t>(width - 2 * actionRow[0].x), th.hairline);
+    for (int i = 0; i < 5; ++i) {
+        const Rect& cell = actionRow[static_cast<std::size_t>(i)];
+        if (i > 0) tft_.drawFastVLine(cell.x, cell.y, cell.h, th.hairline);
+        const bool primary = (i == 2);
+        const uint16_t iconColor = primary ? th.accent : th.textMuted;
+        const int16_t iconCx = static_cast<int16_t>(cell.x + cell.w / 2);
+        const int16_t iconCy = static_cast<int16_t>(cell.y + cell.h / 2 - 6);
+        switch (i) {
+            case 0: iconSliders(tft_, iconCx, iconCy, iconColor, th.bg); break;
+            case 1: iconList(tft_, iconCx, iconCy, iconColor, th.bg); break;
+            case 2: iconEye(tft_, iconCx, iconCy, iconColor, th.bg); break;
+            case 3: iconShuffle(tft_, iconCx, iconCy, iconColor, th.bg); break;
+            case 4: iconGear(tft_, iconCx, iconCy, iconColor, th.bg); break;
+            default: break;
+        }
+        tft_.setTextDatum(MC_DATUM);
+        tft_.setTextColor(iconColor, th.bg);
+        tft_.drawString(labels[static_cast<std::size_t>(i)], iconCx, static_cast<int16_t>(cell.y + cell.h - 8), 1);
+    }
+
     drawStatus();
     drawKeyboard();
 }
 
 void BarcodeApplication::drawGatewayHomeBanner() {
     const uint16_t width = tft_.width();
-    const Rect title = homeTitleBarRect(width, tft_.height());
+    const uint16_t height = tft_.height();
+    const Theme& th = theme();
+    const int16_t cx = static_cast<int16_t>(width / 2);
+    const int16_t iconCy = gatewayBannerIconCy(width, height);
 
-    tft_.setTextDatum(TL_DATUM);
-    tft_.setTextColor(kMuted, kBackground);
-    const std::size_t maxChars = static_cast<std::size_t>(std::max(16, (width - 16) / 6));
-    tft_.drawString(clipped(status_, maxChars).c_str(), 8, title.h + 10, 1);
+    tft_.fillCircle(cx, iconCy, 27, th.surface);
+    tft_.drawCircle(cx, iconCy, 27, th.hairline);
+    iconShuffle(tft_, cx, iconCy, th.accent, th.surface);
 
-    drawButton(homeGatewayButtonRect(width, tft_.height()), "VIEW GATEWAY STATS", true, kAccentDark);
-    drawButton(homeGatewayRestartButtonRect(width, tft_.height()), "RESTART DEVICE", false, kDanger);
+    tft_.setTextDatum(MC_DATUM);
+    tft_.setTextColor(th.text, th.bg);
+    tft_.drawString("Relaying USB & ESP-NOW", cx, static_cast<int16_t>(iconCy + 42), 2);
+
+    tft_.setTextColor(th.textMuted, th.bg);
+    const std::size_t maxChars = static_cast<std::size_t>(std::max(20, (width - 40) / 6));
+    tft_.drawString(clipped(status_, maxChars).c_str(), cx, static_cast<int16_t>(iconCy + 62), 1);
+
+    const auto buttons = gatewayBannerButtons(width, height);
+    drawButton(buttons[0], "VIEW STATS", true);
+    drawButton(buttons[1], "RESTART", false, theme().danger);
 }
 
 void BarcodeApplication::drawDataPreview() {
+    const Theme& th = theme();
     const Rect box = homeDataBoxRect(tft_.width(), tft_.height());
-    tft_.fillRect(box.x + 4, box.y + 4, box.w - 8, box.h - 8, TFT_WHITE);
-    tft_.setTextDatum(TL_DATUM);
-    tft_.setTextColor(TFT_BLACK, TFT_WHITE);
+    tft_.fillRoundRect(static_cast<int16_t>(box.x + 1), static_cast<int16_t>(box.y + 1),
+                       static_cast<int16_t>(box.w - 2), static_cast<int16_t>(box.h - 2), 11, th.surface);
+
+    if (spec_.data.empty()) {
+        tft_.setTextDatum(ML_DATUM);
+        tft_.setTextColor(th.textFaint, th.surface);
+        tft_.drawString("Type to preview your data...", static_cast<int16_t>(box.x + 10),
+                        static_cast<int16_t>(box.y + box.h / 2), 2);
+        return;
+    }
+
     const std::string text = printablePreview(spec_.data);
-    const std::size_t charsPerLine = static_cast<std::size_t>(std::max(8, (box.w - 14) / 9));
-    const std::size_t lines = static_cast<std::size_t>(std::max(1, (box.h - 11) / 19));
+    tft_.setTextDatum(TL_DATUM);
+    tft_.setTextColor(th.text, th.surface);
+    const std::size_t charsPerLine = static_cast<std::size_t>(std::max(8, (box.w - 44) / 9));
+    const std::size_t lines = static_cast<std::size_t>(std::max(1, (box.h - 11) / 17));
     std::size_t start = 0;
     if (text.size() > charsPerLine * lines) start = text.size() - charsPerLine * lines;
     for (std::size_t line = 0; line < lines; ++line) {
         const std::size_t pos = start + line * charsPerLine;
         if (pos >= text.size()) break;
         tft_.drawString(text.substr(pos, charsPerLine).c_str(),
-                        box.x + 7,
-                        box.y + 7 + static_cast<int>(line) * 19,
+                        static_cast<int16_t>(box.x + 10),
+                        static_cast<int16_t>(box.y + 7 + static_cast<int>(line) * 17),
                         2);
     }
-    tft_.setTextDatum(BR_DATUM);
-    char count[24];
-    std::snprintf(count, sizeof(count), "%u bytes", static_cast<unsigned>(spec_.data.size()));
-    tft_.setTextColor(0x7BEF, TFT_WHITE);
-    tft_.drawString(count, box.x + box.w - 5, box.y + box.h - 4, 1);
+
+    const Rect clearBtn = homeClearButtonRect(tft_.width(), tft_.height());
+    iconClose(tft_, static_cast<int16_t>(clearBtn.x + clearBtn.w / 2), static_cast<int16_t>(clearBtn.y + clearBtn.h / 2),
+             th.textFaint, th.surface);
 }
 
 void BarcodeApplication::drawStatus() {
+    const Theme& th = theme();
     const Rect rect = homeStatusRect(tft_.width(), tft_.height());
-    tft_.fillRect(rect.x, rect.y, rect.w, rect.h, kBackground);
+    tft_.fillRect(rect.x, rect.y, rect.w, rect.h, th.bg);
     tft_.setTextDatum(TL_DATUM);
-    tft_.setTextColor(kMuted, kBackground);
+    tft_.setTextColor(th.textFaint, th.bg);
     const std::size_t maxChars = static_cast<std::size_t>(std::max(16, rect.w / 6));
     tft_.drawString(clipped(status_, maxChars).c_str(), rect.x + 1, rect.y, 1);
 }
@@ -467,6 +878,7 @@ void BarcodeApplication::setStatus(const std::string& status, bool redraw) {
 }
 
 void BarcodeApplication::drawKeyboard() {
+    const Theme& th = theme();
     const uint16_t width = tft_.width();
     const KeyboardMetrics metrics = keyboardMetrics(width, tft_.height());
 
@@ -490,7 +902,7 @@ void BarcodeApplication::drawKeyboard() {
                                                  ? static_cast<int>(width) - x
                                                  : keyWidth) - 2),
                       static_cast<int16_t>(metrics.rowHeight - 2)};
-            drawButton(rect, std::string(1, keys[static_cast<std::size_t>(i)]), false, kPanelAlt);
+            drawButton(rect, std::string(1, keys[static_cast<std::size_t>(i)]), false, th.surfaceAlt);
         }
     }
 
@@ -500,11 +912,14 @@ void BarcodeApplication::drawKeyboard() {
     drawButton(control.keys[0],
                keyboardPage_ == KeyboardPage::Symbols
                    ? "FNC1"
-                   : (keyboardPage_ == KeyboardPage::Upper ? "abc" : "ABC"));
-    drawButton(control.keys[1], "SYM");
-    drawButton(control.keys[2], "SPACE");
-    drawButton(control.keys[3], "BKSP");
-    drawButton(control.keys[4], "GO", true, kAccentDark);
+                   : (keyboardPage_ == KeyboardPage::Upper ? "abc" : "ABC"),
+               false, th.surfaceAlt);
+    drawButton(control.keys[1], "SYM", false, th.surfaceAlt);
+    drawButton(control.keys[2], "", false, th.surfaceAlt);
+    drawButton(control.keys[3], "", false, th.surfaceAlt);
+    iconBackspace(tft_, static_cast<int16_t>(control.keys[3].x + control.keys[3].w / 2),
+                 static_cast<int16_t>(control.keys[3].y + control.keys[3].h / 2), th.text, th.surfaceAlt);
+    drawButton(control.keys[4], "GO", true);
 }
 
 void BarcodeApplication::handleHomeTouch(uint16_t x, uint16_t y) {
@@ -512,35 +927,50 @@ void BarcodeApplication::handleHomeTouch(uint16_t x, uint16_t y) {
     const uint16_t height = tft_.height();
 
     if (gatewayModeActive_) {
-        if (homeGatewayButtonRect(width, height).contains(x, y, kTouchPad)) {
+        if (subHeaderToggleRect(width, height).contains(x, y, kTouchPad)) {
+            toggleTheme();
+            return;
+        }
+        const auto buttons = gatewayBannerButtons(width, height);
+        if (buttons[0].contains(x, y, kTouchPad)) {
             view_ = View::Gateway;
             gatewayStatsRedrawAt_ = 0;  // force an immediate draw rather than waiting for the next throttled refresh
             drawGateway();
-        } else if (homeGatewayRestartButtonRect(width, height).contains(x, y, kTouchPad)) {
+        } else if (buttons[1].contains(x, y, kTouchPad)) {
             rebootDevice();
         }
         return;
     }
 
-    const auto topRow = homeTopRow(width, height);
-    const auto actionRow = homeActionRow(width, height);
-    const KeyboardMetrics metrics = keyboardMetrics(width, height);
-
-    if (topRow[0].contains(x, y, kTouchPad)) {
+    if (homeToggleRect(width, height).contains(x, y, kTouchPad)) {
+        toggleTheme();
+        return;
+    }
+    if (homeChipRect(width, height).contains(x, y, kTouchPad)) {
         view_ = View::TypePicker;
         drawTypePicker();
-    } else if (topRow[1].contains(x, y, kTouchPad)) {
-        spec_.data.clear();
-        setStatus("Payload cleared", false);
-        drawDataPreview();
-        drawStatus();
-    } else if (topRow[2].contains(x, y, kTouchPad)) {
+        return;
+    }
+    if (homeSaveIconRect(width, height).contains(x, y, kTouchPad)) {
         const std::string slot = presets_.nextSlotName();
         std::string error;
         if (slot.empty()) setStatus("All 32 preset slots are occupied");
         else if (presets_.save(slot, spec_, error)) setStatus("Saved as " + slot);
         else setStatus("Save failed: " + error);
-    } else if (actionRow[0].contains(x, y, kTouchPad)) {
+        return;
+    }
+    if (!spec_.data.empty() && homeClearButtonRect(width, height).contains(x, y, kTouchPad)) {
+        spec_.data.clear();
+        setStatus("Payload cleared", false);
+        drawDataPreview();
+        drawStatus();
+        return;
+    }
+
+    const auto actionRow = homeActionRow(width, height);
+    const KeyboardMetrics metrics = keyboardMetrics(width, height);
+
+    if (actionRow[0].contains(x, y, kTouchPad)) {
         view_ = View::Options;
         drawOptions();
     } else if (actionRow[1].contains(x, y, kTouchPad)) {
@@ -632,55 +1062,50 @@ void BarcodeApplication::drawTypePicker() {
     applyOrientationForView(View::TypePicker);
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const bool wide = width > height;
+    const Theme& th = theme();
 
-    tft_.fillScreen(kBackground);
-    const int16_t headerH = static_cast<int16_t>(wide ? 24 : 32);
-    tft_.fillRect(0, 0, width, headerH, kAccentDark);
-    tft_.setTextDatum(MC_DATUM);
-    tft_.setTextColor(kText, kAccentDark);
-    tft_.drawString("SELECT SYMBOLOGY", width / 2, headerH / 2, 4);
+    tft_.fillScreen(th.bg);
+    const int16_t contentTop = drawSubHeader("Symbology");
 
     const auto& types = supportedTypes();
-    const int columns = wide ? 3 : 2;
-    const int16_t cellW = static_cast<int16_t>(wide ? 149 : 148);
-    const int16_t colStride = static_cast<int16_t>(wide ? 157 : 156);
-    const int16_t rowStride = static_cast<int16_t>(wide ? 48 : 52);
-    const int16_t cellH = 44;
-    const int16_t gridTop = static_cast<int16_t>(wide ? 30 : 42);
+    const TypeGrid grid = typeGridMetrics(width, height, static_cast<int16_t>(contentTop + 4),
+                                          static_cast<int>(types.size()));
     for (std::size_t i = 0; i < types.size(); ++i) {
-        const int column = static_cast<int>(i) % columns;
-        const int row = static_cast<int>(i) / columns;
-        Rect rect{static_cast<int16_t>(8 + column * colStride),
-                  static_cast<int16_t>(gridTop + row * rowStride),
-                  cellW,
-                  cellH};
-        drawButton(rect, displayName(types[i]), types[i] == spec_.type);
+        const int column = static_cast<int>(i) % grid.columns;
+        const int row = static_cast<int>(i) / grid.columns;
+        Rect rect{static_cast<int16_t>(grid.left + column * grid.colStride),
+                  static_cast<int16_t>(grid.top + row * grid.rowStride),
+                  grid.cellW, grid.cellH};
+        const bool selected = types[i] == spec_.type;
+        const uint16_t fill = selected ? th.accent : th.surface;
+        const uint16_t border = selected ? th.accent : th.hairline;
+        tft_.fillRoundRect(rect.x, rect.y, rect.w, rect.h, 10, fill);
+        tft_.drawRoundRect(rect.x, rect.y, rect.w, rect.h, 10, border);
+        tft_.setTextDatum(MC_DATUM);
+        tft_.setTextColor(selected ? th.accentText : th.text, fill);
+        tft_.drawString(displayName(types[i]).c_str(), static_cast<int16_t>(rect.x + rect.w / 2),
+                        static_cast<int16_t>(rect.y + rect.h / 2 - 7), 2);
+        tft_.setTextColor(selected ? th.accentText : th.textMuted, fill);
+        tft_.drawString(symbologyHint(types[i]).c_str(), static_cast<int16_t>(rect.x + rect.w / 2),
+                        static_cast<int16_t>(rect.y + rect.h / 2 + 9), 1);
     }
-
-    const Rect back = wide ? Rect{8, static_cast<int16_t>(height - 48), static_cast<int16_t>(width - 16), 40}
-                            : Rect{8, 430, 304, 42};
-    drawButton(back, "BACK");
 }
 
 void BarcodeApplication::handleTypeTouch(uint16_t x, uint16_t y) {
+    if (handleSubHeaderTouch(x, y, View::Home)) return;
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const bool wide = width > height;
-    const int16_t backY = static_cast<int16_t>(wide ? height - 48 : 430);
-    if (y >= static_cast<uint16_t>(backY - 5)) {
-        showHome();
-        return;
-    }
-    const int columns = wide ? 3 : 2;
-    const int16_t colStride = static_cast<int16_t>(wide ? 157 : 156);
-    const int16_t rowStride = static_cast<int16_t>(wide ? 48 : 52);
-    const int16_t gridTop = static_cast<int16_t>(wide ? 30 : 42);
-    if (y < static_cast<uint16_t>(gridTop)) return;
-    const int column = std::min(columns - 1, static_cast<int>(x) / colStride);
-    const int row = (static_cast<int>(y) - gridTop) / rowStride;
-    const std::size_t index = static_cast<std::size_t>(row * columns + column);
-    if (index < supportedTypes().size()) selectType(index);
+    const auto& types = supportedTypes();
+    const TypeGrid grid = typeGridMetrics(width, height,
+                                          static_cast<int16_t>(subHeaderHeight(width, height) + 4),
+                                          static_cast<int>(types.size()));
+    if (y < static_cast<uint16_t>(grid.top)) return;
+    const int rawColumn = static_cast<int>(x) - grid.left;
+    if (rawColumn < 0) return;
+    const int column = std::min(grid.columns - 1, rawColumn / grid.colStride);
+    const int row = (static_cast<int>(y) - grid.top) / grid.rowStride;
+    const std::size_t index = static_cast<std::size_t>(row * grid.columns + column);
+    if (index < types.size()) selectType(index);
 }
 
 void BarcodeApplication::selectType(std::size_t index) {
@@ -692,70 +1117,68 @@ void BarcodeApplication::drawOptions() {
     applyOrientationForView(View::Options);
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const bool wide = width > height;
+    const Theme& th = theme();
 
-    tft_.fillScreen(kBackground);
-    const int16_t headerH = static_cast<int16_t>(wide ? 24 : 32);
-    tft_.fillRect(0, 0, width, headerH, kAccentDark);
-    tft_.setTextDatum(MC_DATUM);
-    tft_.setTextColor(kText, kAccentDark);
-    tft_.drawString("OPTIONS", width / 2, headerH / 2, 4);
+    tft_.fillScreen(th.bg);
+    const int16_t contentTop = drawSubHeader("Options");
 
-    std::array<std::pair<std::string, std::string>, 9> rows = {{
-        {"ECC", toString(spec_.ecc)},
-        {"Rotation", toString(spec_.rotation)},
-        {"Quiet zone", spec_.quietZone < 0 ? "default" : std::to_string(spec_.quietZone)},
-        {"Min module", std::to_string(spec_.minModulePixels) + " px"},
-        {"DM shape", spec_.dataMatrixRectangular ? "rectangle" : "square"},
-        {"Invert", spec_.invert ? "yes" : "no"},
-        {"Checksum", spec_.checksum ? "yes" : "no"},
-        {"Aztec security", std::to_string(spec_.aztecSecurityPercent) + "%"},
-        {"Aztec layers", std::to_string(spec_.aztecMinLayers)}
+    const std::array<std::pair<std::string, std::string>, 9> rows = {{
+        {"Error Correction", toString(spec_.ecc)},
+        {"Content Rotation", toString(spec_.rotation)},
+        {"Quiet Zone", spec_.quietZone < 0 ? "default" : std::to_string(spec_.quietZone)},
+        {"Min Module", std::to_string(spec_.minModulePixels) + " px"},
+        {"DM Shape", spec_.dataMatrixRectangular ? "rectangle" : "square"},
+        {"Invert Colors", spec_.invert ? "on" : "off"},
+        {"Checksum", spec_.checksum ? "on" : "off"},
+        {"Aztec Security", std::to_string(spec_.aztecSecurityPercent) + "%"},
+        {"Aztec Layers", std::to_string(spec_.aztecMinLayers)}
     }};
+    static constexpr bool kIsSwitchRow[9] = {false, false, false, false, false, true, true, false, false};
 
-    const int16_t gridTop = static_cast<int16_t>(wide ? 30 : 38);
-    const int16_t rowStride = static_cast<int16_t>(wide ? 26 : 41);
-    const int16_t rowH = static_cast<int16_t>(wide ? 22 : 36);
+    const int16_t footerH = optionsFooterHeight(width, height);
+    const Rect card = optionsListCardRect(width, height, contentTop, footerH);
+    tft_.fillRoundRect(card.x, card.y, card.w, card.h, 12, th.surface);
+    tft_.drawRoundRect(card.x, card.y, card.w, card.h, 12, th.hairline);
+    const int16_t rowH = static_cast<int16_t>(card.h / 9);
     for (int row = 0; row < static_cast<int>(rows.size()); ++row) {
-        const int16_t y = static_cast<int16_t>(gridTop + row * rowStride);
-        tft_.fillRoundRect(8, y, width - 16, rowH, 4, kPanel);
+        const int16_t y = static_cast<int16_t>(card.y + row * rowH);
+        if (row > 0) tft_.drawFastHLine(static_cast<int16_t>(card.x + 2), y, static_cast<int16_t>(card.w - 4), th.hairline);
         tft_.setTextDatum(ML_DATUM);
-        tft_.setTextColor(kMuted, kPanel);
-        tft_.drawString(rows[static_cast<std::size_t>(row)].first.c_str(), 16, y + rowH / 2, 2);
-        tft_.setTextDatum(MR_DATUM);
-        tft_.setTextColor(kText, kPanel);
-        tft_.drawString(("<  " + rows[static_cast<std::size_t>(row)].second + "  >").c_str(),
-                        width - 16, y + rowH / 2, 2);
+        tft_.setTextColor(th.text, th.surface);
+        tft_.drawString(rows[static_cast<std::size_t>(row)].first.c_str(), static_cast<int16_t>(card.x + 12),
+                        static_cast<int16_t>(y + rowH / 2), 2);
+        if (kIsSwitchRow[row]) {
+            const bool on = row == 5 ? spec_.invert : spec_.checksum;
+            const Rect sw{static_cast<int16_t>(card.x + card.w - 42), static_cast<int16_t>(y + rowH / 2 - 9), 30, 18};
+            drawMiniSwitch(sw, on);
+        } else {
+            tft_.setTextDatum(MR_DATUM);
+            tft_.setTextColor(th.textMuted, th.surface);
+            const std::string valueText = "<  " + rows[static_cast<std::size_t>(row)].second + "  >";
+            tft_.drawString(valueText.c_str(), static_cast<int16_t>(card.x + card.w - 14), static_cast<int16_t>(y + rowH / 2), 2);
+        }
     }
-    if (wide) {
-        drawButton({8, static_cast<int16_t>(height - 48), 228, 40}, "BACK");
-        drawButton({244, static_cast<int16_t>(height - 48), 228, 40}, "DISPLAY", true, kAccentDark);
-    } else {
-        drawButton({8, 420, 145, 50}, "BACK");
-        drawButton({167, 420, 145, 50}, "DISPLAY", true, kAccentDark);
-    }
+
+    drawButton(optionsDisplayButtonRect(width, height), "DISPLAY", true);
 }
 
 void BarcodeApplication::handleOptionsTouch(uint16_t x, uint16_t y) {
+    if (handleSubHeaderTouch(x, y, View::Home)) return;
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const bool wide = width > height;
-    const int16_t footerY = static_cast<int16_t>(wide ? height - 48 : 420);
-    const int16_t gridTop = static_cast<int16_t>(wide ? 30 : 38);
-    const int16_t rowStride = static_cast<int16_t>(wide ? 26 : 41);
 
-    if (y >= static_cast<uint16_t>(footerY - 5)) {
-        if (x < width / 2) showHome("Options updated");
-        else {
-            std::string error;
-            if (!generate(spec_, true, error)) {
-                showHome("Error: " + error);
-            }
-        }
+    if (optionsDisplayButtonRect(width, height).contains(x, y, kTouchPad)) {
+        std::string error;
+        if (!generate(spec_, true, error)) showHome("Error: " + error);
         return;
     }
-    if (y < static_cast<uint16_t>(gridTop)) return;
-    const int row = (static_cast<int>(y) - gridTop) / rowStride;
+
+    const int16_t contentTop = subHeaderHeight(width, height);
+    const int16_t footerH = optionsFooterHeight(width, height);
+    const Rect card = optionsListCardRect(width, height, contentTop, footerH);
+    if (!card.contains(x, y, 0)) return;
+    const int16_t rowH = static_cast<int16_t>(card.h / 9);
+    const int row = (static_cast<int>(y) - card.y) / rowH;
     if (row >= 0 && row < 9) {
         cycleOption(row, x < width / 2 ? -1 : 1);
         drawOptions();
@@ -813,14 +1236,10 @@ void BarcodeApplication::drawPresets() {
     applyOrientationForView(View::Presets);
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const bool wide = width > height;
+    const Theme& th = theme();
 
-    tft_.fillScreen(kBackground);
-    const int16_t headerH = static_cast<int16_t>(wide ? 24 : 32);
-    tft_.fillRect(0, 0, width, headerH, presetDeleteMode_ ? kDanger : kAccentDark);
-    tft_.setTextDatum(MC_DATUM);
-    tft_.setTextColor(kText, presetDeleteMode_ ? kDanger : kAccentDark);
-    tft_.drawString(presetDeleteMode_ ? "TAP PRESET TO DELETE" : "PRESETS", width / 2, headerH / 2, 4);
+    tft_.fillScreen(th.bg);
+    const int16_t contentTop = drawSubHeader(presetDeleteMode_ ? "Tap to Delete" : "Presets");
 
     const auto names = presets_.list();
     constexpr std::size_t pageSize = 8;
@@ -828,80 +1247,81 @@ void BarcodeApplication::drawPresets() {
     if (presetPage_ >= pages) presetPage_ = pages - 1;
     const std::size_t start = presetPage_ * pageSize;
 
-    const int16_t gridTop = static_cast<int16_t>(wide ? 30 : 42);
-    const int16_t rowStride = static_cast<int16_t>(wide ? 29 : 45);
-    const int16_t rowH = static_cast<int16_t>(wide ? 25 : 38);
+    const int16_t footerH = presetsFooterHeight(width, height);
+    const Rect card = presetsListCardRect(width, height, contentTop, footerH);
+    tft_.fillRoundRect(card.x, card.y, card.w, card.h, 12, th.surface);
+    tft_.drawRoundRect(card.x, card.y, card.w, card.h, 12, th.hairline);
+    const int16_t rowH = static_cast<int16_t>(card.h / static_cast<int16_t>(pageSize));
     for (std::size_t i = 0; i < pageSize; ++i) {
+        const int16_t y = static_cast<int16_t>(card.y + static_cast<int>(i) * rowH);
+        if (i > 0) tft_.drawFastHLine(static_cast<int16_t>(card.x + 2), y, static_cast<int16_t>(card.w - 4), th.hairline);
         const std::size_t index = start + i;
-        Rect rect{8, static_cast<int16_t>(gridTop + static_cast<int>(i) * rowStride),
-                  static_cast<int16_t>(width - 16), rowH};
-        if (index < names.size()) drawButton(rect, names[index], false, presetDeleteMode_ ? kDanger : kPanel);
-        else drawButton(rect, "(empty)", false, kBackground);
+        tft_.setTextDatum(ML_DATUM);
+        if (index < names.size()) {
+            tft_.setTextColor(presetDeleteMode_ ? th.danger : th.text, th.surface);
+            tft_.drawString(clipped(names[index], 26).c_str(), static_cast<int16_t>(card.x + 12), static_cast<int16_t>(y + rowH / 2), 2);
+            if (presetDeleteMode_) {
+                iconClose(tft_, static_cast<int16_t>(card.x + card.w - 16), static_cast<int16_t>(y + rowH / 2), th.danger, th.surface);
+            }
+        } else {
+            tft_.setTextColor(th.textFaint, th.surface);
+            tft_.drawString("--", static_cast<int16_t>(card.x + 12), static_cast<int16_t>(y + rowH / 2), 2);
+        }
     }
 
-    if (wide) {
-        const auto footer = distributeRow(width, static_cast<int16_t>(height - 48), 40, 4);
-        drawButton(footer[0], "BACK");
-        drawButton(footer[1], "SAVE");
-        drawButton(footer[2], presetDeleteMode_ ? "CANCEL" : "DELETE", false, presetDeleteMode_ ? kDanger : kPanel);
-        drawButton(footer[3], "NEXT");
-    } else {
-        drawButton({8, 410, 70, 60}, "BACK");
-        drawButton({84, 410, 70, 60}, "SAVE");
-        drawButton({160, 410, 70, 60}, presetDeleteMode_ ? "CANCEL" : "DELETE", false, presetDeleteMode_ ? kDanger : kPanel);
-        drawButton({236, 410, 76, 60}, "NEXT");
-    }
+    const auto footer = presetsFooterButtons(width, height);
+    drawButton(footer[0], "SAVE");
+    drawButton(footer[1], presetDeleteMode_ ? "CANCEL" : "DELETE", false, presetDeleteMode_ ? th.danger : th.surfaceAlt);
+    tft_.fillRoundRect(footer[2].x, footer[2].y, footer[2].w, footer[2].h, 8, th.surface);
+    tft_.drawRoundRect(footer[2].x, footer[2].y, footer[2].w, footer[2].h, 8, th.hairline);
+    iconChevronLeft(tft_, static_cast<int16_t>(footer[2].x + 16), static_cast<int16_t>(footer[2].y + footer[2].h / 2), th.textMuted, th.surface);
+    iconChevronRight(tft_, static_cast<int16_t>(footer[2].x + footer[2].w - 16), static_cast<int16_t>(footer[2].y + footer[2].h / 2), th.textMuted, th.surface);
+    tft_.setTextDatum(MC_DATUM);
+    tft_.setTextColor(th.textMuted, th.surface);
+    char pageBuf[20];
+    std::snprintf(pageBuf, sizeof(pageBuf), "%u / %u", static_cast<unsigned>(presetPage_ + 1), static_cast<unsigned>(pages));
+    tft_.drawString(pageBuf, static_cast<int16_t>(footer[2].x + footer[2].w / 2), static_cast<int16_t>(footer[2].y + footer[2].h / 2), 1);
 }
 
 void BarcodeApplication::handlePresetsTouch(uint16_t x, uint16_t y) {
+    if (handleSubHeaderTouch(x, y, View::Home)) return;
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const bool wide = width > height;
-    const int16_t footerY = static_cast<int16_t>(wide ? height - 48 : 410);
-    const int16_t gridTop = static_cast<int16_t>(wide ? 30 : 42);
-    const int16_t rowStride = static_cast<int16_t>(wide ? 29 : 45);
+    const auto footer = presetsFooterButtons(width, height);
 
-    if (y >= static_cast<uint16_t>(footerY - 5)) {
-        const std::vector<Rect> footer = wide
-            ? distributeRow(width, footerY, 40, 4)
-            : std::vector<Rect>{Rect{8, 410, 70, 60}, Rect{84, 410, 70, 60}, Rect{160, 410, 70, 60},
-                                Rect{236, 410, 76, 60}};
-        int index = 3;
-        for (int i = 0; i < 4; ++i) {
-            if (x < static_cast<uint16_t>(footer[static_cast<std::size_t>(i)].x +
-                                          footer[static_cast<std::size_t>(i)].w)) {
-                index = i;
-                break;
-            }
-        }
-        if (index == 0) {
-            showHome();
-            return;
-        }
-        if (index == 1) {
-            const std::string slot = presets_.nextSlotName();
-            std::string error;
-            if (slot.empty()) {
-                status_ = "Preset slots full";
-            } else if (presets_.save(slot, spec_, error)) {
-                status_ = "Saved as " + slot;
-            } else {
-                status_ = "Save failed: " + error;
-            }
-            drawPresets();
-        } else if (index == 2) {
-            presetDeleteMode_ = !presetDeleteMode_;
-            drawPresets();
-        } else {
-            const auto names = presets_.list();
-            const std::size_t pages = std::max<std::size_t>(1, (names.size() + 7) / 8);
-            presetPage_ = (presetPage_ + 1) % pages;
-            drawPresets();
-        }
+    if (footer[0].contains(x, y, kTouchPad)) {
+        const std::string slot = presets_.nextSlotName();
+        std::string error;
+        if (slot.empty()) status_ = "Preset slots full";
+        else if (presets_.save(slot, spec_, error)) status_ = "Saved as " + slot;
+        else status_ = "Save failed: " + error;
+        drawPresets();
         return;
     }
-    if (y < static_cast<uint16_t>(gridTop)) return;
-    const int row = (static_cast<int>(y) - gridTop) / rowStride;
+    if (footer[1].contains(x, y, kTouchPad)) {
+        presetDeleteMode_ = !presetDeleteMode_;
+        drawPresets();
+        return;
+    }
+    if (footer[2].contains(x, y, kTouchPad)) {
+        const auto names = presets_.list();
+        const std::size_t pages = std::max<std::size_t>(1, (names.size() + 7) / 8);
+        const int16_t third = static_cast<int16_t>(footer[2].w / 3);
+        if (x < static_cast<uint16_t>(footer[2].x + third)) {
+            presetPage_ = presetPage_ == 0 ? pages - 1 : presetPage_ - 1;
+        } else if (x >= static_cast<uint16_t>(footer[2].x + footer[2].w - third)) {
+            presetPage_ = (presetPage_ + 1) % pages;
+        }
+        drawPresets();
+        return;
+    }
+
+    const int16_t contentTop = subHeaderHeight(width, height);
+    const int16_t footerH = presetsFooterHeight(width, height);
+    const Rect card = presetsListCardRect(width, height, contentTop, footerH);
+    if (!card.contains(x, y, 0)) return;
+    const int16_t rowH = static_cast<int16_t>(card.h / 8);
+    const int row = (static_cast<int>(y) - card.y) / rowH;
     if (row < 0 || row >= 8) return;
     const auto names = presets_.list();
     const std::size_t index = presetPage_ * 8 + static_cast<std::size_t>(row);
@@ -929,53 +1349,42 @@ void BarcodeApplication::drawSettings() {
     applyOrientationForView(View::Settings);
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const bool wide = width > height;
+    const Theme& th = theme();
 
-    tft_.fillScreen(kBackground);
-    const int16_t headerH = static_cast<int16_t>(wide ? 24 : 32);
-    tft_.fillRect(0, 0, width, headerH, kAccentDark);
-    tft_.setTextDatum(MC_DATUM);
-    tft_.setTextColor(kText, kAccentDark);
-    tft_.drawString("SETTINGS", width / 2, headerH / 2, 4);
+    tft_.fillScreen(th.bg);
+    const int16_t contentTop = drawSubHeader("Settings");
 
-    const int16_t gridTop = static_cast<int16_t>(wide ? 30 : 38);
-    const int16_t rowStride = static_cast<int16_t>(wide ? 44 : 50);
-    const int16_t rowH = static_cast<int16_t>(wide ? 38 : 44);
     const std::array<std::pair<const char*, ScreenOrientation>, 2> rows = {{
-        {"Barcode orientation", config_.barcodeOrientation()},
-        {"Editor orientation", config_.editorOrientation()},
+        {"Barcode Orientation", config_.barcodeOrientation()},
+        {"Editor Orientation", config_.editorOrientation()},
     }};
+    const Rect card = settingsCardRect(width, height, contentTop);
+    tft_.fillRoundRect(card.x, card.y, card.w, card.h, 12, th.surface);
+    tft_.drawRoundRect(card.x, card.y, card.w, card.h, 12, th.hairline);
+    const int16_t rowH = static_cast<int16_t>(card.h / 2);
     for (int row = 0; row < 2; ++row) {
-        const int16_t y = static_cast<int16_t>(gridTop + row * rowStride);
-        tft_.fillRoundRect(8, y, width - 16, rowH, 4, kPanel);
+        const int16_t y = static_cast<int16_t>(card.y + row * rowH);
+        if (row > 0) tft_.drawFastHLine(static_cast<int16_t>(card.x + 2), y, static_cast<int16_t>(card.w - 4), th.hairline);
         tft_.setTextDatum(ML_DATUM);
-        tft_.setTextColor(kMuted, kPanel);
-        tft_.drawString(rows[static_cast<std::size_t>(row)].first, 16, y + rowH / 2, 2);
+        tft_.setTextColor(th.text, th.surface);
+        tft_.drawString(rows[static_cast<std::size_t>(row)].first, static_cast<int16_t>(card.x + 12), static_cast<int16_t>(y + rowH / 2), 2);
         tft_.setTextDatum(MR_DATUM);
-        tft_.setTextColor(kText, kPanel);
+        tft_.setTextColor(th.textMuted, th.surface);
         const std::string label =
             std::string("<  ") + orientationLabel(rows[static_cast<std::size_t>(row)].second) + " deg  >";
-        tft_.drawString(label.c_str(), width - 16, y + rowH / 2, 2);
+        tft_.drawString(label.c_str(), static_cast<int16_t>(card.x + card.w - 14), static_cast<int16_t>(y + rowH / 2), 2);
     }
-
-    const int16_t backY = static_cast<int16_t>(wide ? height - 48 : gridTop + 2 * rowStride + 10);
-    drawButton({8, backY, static_cast<int16_t>(width - 16), 40}, "BACK");
 }
 
 void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
+    if (handleSubHeaderTouch(x, y, View::Home)) return;
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const bool wide = width > height;
-    const int16_t gridTop = static_cast<int16_t>(wide ? 30 : 38);
-    const int16_t rowStride = static_cast<int16_t>(wide ? 44 : 50);
-    const int16_t backY = static_cast<int16_t>(wide ? height - 48 : gridTop + 2 * rowStride + 10);
-
-    if (y >= static_cast<uint16_t>(backY - 5)) {
-        showHome();
-        return;
-    }
-    if (y < static_cast<uint16_t>(gridTop)) return;
-    const int row = (static_cast<int>(y) - gridTop) / rowStride;
+    const int16_t contentTop = subHeaderHeight(width, height);
+    const Rect card = settingsCardRect(width, height, contentTop);
+    if (!card.contains(x, y, 0)) return;
+    const int16_t rowH = static_cast<int16_t>(card.h / 2);
+    const int row = (static_cast<int>(y) - card.y) / rowH;
     if (row < 0 || row > 1) return;
 
     const int direction = x < width / 2 ? -1 : 1;
@@ -985,113 +1394,87 @@ void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
     setOrientation(target, static_cast<ScreenOrientation>(next));
 }
 
-namespace {
-constexpr int16_t kGatewayBackButtonHeight = 40;
-
-// BACK (left) returns to the Home banner without leaving gateway mode; RESTART (right) is the
-// only in-device way back to the normal ESP Barcode Lab screen, since gateway mode is a one-way
-// switch (see main.cpp).
-std::array<Rect, 2> gatewayFooterButtons(uint16_t width, uint16_t height) {
-    const int16_t y = static_cast<int16_t>(height - kGatewayBackButtonHeight - 6);
-    const int16_t gap = 8;
-    const int16_t buttonW = static_cast<int16_t>((static_cast<int>(width) - 16 - gap) / 2);
-    return {Rect{8, y, buttonW, kGatewayBackButtonHeight},
-            Rect{static_cast<int16_t>(8 + buttonW + gap), y, buttonW, kGatewayBackButtonHeight}};
-}
-
-std::string formatMac(const std::array<uint8_t, 6>& mac) {
-    char buf[24];
-    std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    return buf;
-}
-
-std::string formatAgeSeconds(uint32_t nowMs, uint32_t lastSeenMs) {
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%lus ago", static_cast<unsigned long>((nowMs - lastSeenMs) / 1000));
-    return buf;
-}
-}  // namespace
-
 void BarcodeApplication::drawGateway() {
     applyOrientationForView(View::Gateway);
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const bool wide = width > height;
+    const Theme& th = theme();
 
-    tft_.fillScreen(kBackground);
-    const int16_t headerH = static_cast<int16_t>(wide ? 24 : 32);
-    tft_.fillRect(0, 0, width, headerH, kAccentDark);
-    tft_.setTextDatum(MC_DATUM);
-    tft_.setTextColor(kText, kAccentDark);
-    tft_.drawString("GATEWAY", width / 2, headerH / 2, 4);
+    tft_.fillScreen(th.bg);
+    const int16_t contentTop = drawSubHeader("Gateway");
 
     const esplink::GatewayStats::Snapshot& link = gatewayStats_.linkStats;
-    const int16_t rowH = static_cast<int16_t>(wide ? 20 : 24);
-    int16_t y = static_cast<int16_t>(headerH + 6);
+    const Rect pill = gatewayStatusPillRect(contentTop);
+    tft_.fillRoundRect(pill.x, pill.y, pill.w, pill.h, static_cast<int16_t>(pill.h / 2), th.surface);
+    tft_.drawRoundRect(pill.x, pill.y, pill.w, pill.h, static_cast<int16_t>(pill.h / 2), th.hairline);
+    tft_.fillCircle(static_cast<int16_t>(pill.x + 14), static_cast<int16_t>(pill.y + pill.h / 2), 4,
+                    link.hostConnected ? th.accent : th.danger);
+    tft_.setTextDatum(ML_DATUM);
+    tft_.setTextColor(th.text, th.surface);
+    const char* hostLabel = !link.hostEverSeen ? "NO HOST YET" : link.hostConnected ? "USB HOST CONNECTED" : "USB HOST LOST";
+    tft_.drawString(hostLabel, static_cast<int16_t>(pill.x + 24), static_cast<int16_t>(pill.y + pill.h / 2), 1);
 
-    auto drawStatLine = [&](const std::string& label, const std::string& value, uint16_t valueColor) {
+    const int16_t statsY = static_cast<int16_t>(pill.y + pill.h + 6);
+    const auto tiles = gatewayStatTiles(width, statsY);
+    const std::array<std::pair<std::string, const char*>, 3> stats = {{
+        {std::to_string(link.peerCount), "PEERS"},
+        {std::to_string(gatewayStats_.usbToEspNowMessageCount), "SENT"},
+        {std::to_string(gatewayStats_.espNowToUsbMessageCount), "RECEIVED"},
+    }};
+    for (int i = 0; i < 3; ++i) {
+        const Rect& tile = tiles[static_cast<std::size_t>(i)];
+        tft_.fillRoundRect(tile.x, tile.y, tile.w, tile.h, 8, th.surface);
+        tft_.drawRoundRect(tile.x, tile.y, tile.w, tile.h, 8, th.hairline);
         tft_.setTextDatum(TL_DATUM);
-        tft_.setTextColor(kMuted, kBackground);
-        tft_.drawString(label.c_str(), 10, y + 3, 2);
-        tft_.setTextDatum(TR_DATUM);
-        tft_.setTextColor(valueColor, kBackground);
-        tft_.drawString(value.c_str(), width - 10, y + 3, 2);
-        y = static_cast<int16_t>(y + rowH);
-    };
+        tft_.setTextColor(th.text, th.surface);
+        tft_.drawString(stats[static_cast<std::size_t>(i)].first.c_str(), static_cast<int16_t>(tile.x + 8), static_cast<int16_t>(tile.y + 5), 2);
+        tft_.setTextColor(th.textMuted, th.surface);
+        tft_.drawString(stats[static_cast<std::size_t>(i)].second, static_cast<int16_t>(tile.x + 8), static_cast<int16_t>(tile.y + tile.h - 14), 1);
+    }
 
-    const std::string hostValue = !link.hostEverSeen ? std::string("NONE")
-                                   : link.hostConnected
-                                       ? "UP (" + formatAgeSeconds(link.nowMs, link.hostLastSeenMs) + ")"
-                                       : "LOST (" + formatAgeSeconds(link.nowMs, link.hostLastSeenMs) + ")";
-    drawStatLine("USB host", hostValue, link.hostConnected ? kAccent : kDanger);
-
-    char countBuf[16];
-    std::snprintf(countBuf, sizeof(countBuf), "%u", static_cast<unsigned>(link.peerCount));
-    drawStatLine("ESP-NOW clients", countBuf, kText);
-
-    std::snprintf(countBuf, sizeof(countBuf), "%lu", static_cast<unsigned long>(gatewayStats_.usbToEspNowMessageCount));
-    drawStatLine("Sent USB->ESPNOW", countBuf, kText);
-
-    std::snprintf(countBuf, sizeof(countBuf), "%lu", static_cast<unsigned long>(gatewayStats_.espNowToUsbMessageCount));
-    drawStatLine("Sent ESPNOW->USB", countBuf, kText);
-
-    y = static_cast<int16_t>(y + 4);
-    tft_.drawFastHLine(8, y, static_cast<int16_t>(width - 16), kPanelAlt);
-    y = static_cast<int16_t>(y + 8);
-
-    const auto footer = gatewayFooterButtons(width, height);
-    const int16_t peerRowH = static_cast<int16_t>(wide ? 16 : 18);
+    const Rect peersCard = gatewayPeersCardRect(width, height, statsY);
+    tft_.fillRoundRect(peersCard.x, peersCard.y, peersCard.w, peersCard.h, 10, th.surface);
+    tft_.drawRoundRect(peersCard.x, peersCard.y, peersCard.w, peersCard.h, 10, th.hairline);
+    const int16_t peerRowH = 16;
     std::size_t shown = 0;
+    int16_t y = static_cast<int16_t>(peersCard.y + 4);
     for (; shown < link.peerCount; ++shown) {
-        if (y + peerRowH > footer[0].y - 4) break;
+        if (y + peerRowH > peersCard.y + peersCard.h - 4) break;
         const auto& peer = link.peers[shown];
         tft_.setTextDatum(TL_DATUM);
-        tft_.setTextColor(kText, kBackground);
-        tft_.drawString(formatMac(peer.mac).c_str(), 10, y + 2, 1);
+        tft_.setTextColor(th.text, th.surface);
+        tft_.drawString(formatMac(peer.mac).c_str(), static_cast<int16_t>(peersCard.x + 8), static_cast<int16_t>(y + 2), 1);
         tft_.setTextDatum(TR_DATUM);
-        tft_.setTextColor(kMuted, kBackground);
-        tft_.drawString(formatAgeSeconds(link.nowMs, peer.lastSeenMs).c_str(), width - 10, y + 2, 1);
+        tft_.setTextColor(th.textMuted, th.surface);
+        tft_.drawString(formatAgeSeconds(link.nowMs, peer.lastSeenMs).c_str(), static_cast<int16_t>(peersCard.x + peersCard.w - 8), static_cast<int16_t>(y + 2), 1);
         y = static_cast<int16_t>(y + peerRowH);
     }
-    if (shown < link.peerCount) {
+    if (link.peerCount == 0) {
+        tft_.setTextDatum(TL_DATUM);
+        tft_.setTextColor(th.textFaint, th.surface);
+        tft_.drawString("No peers connected yet", static_cast<int16_t>(peersCard.x + 8), static_cast<int16_t>(peersCard.y + 8), 1);
+    } else if (shown < link.peerCount) {
         char more[24];
         std::snprintf(more, sizeof(more), "+%u more not shown", static_cast<unsigned>(link.peerCount - shown));
         tft_.setTextDatum(TL_DATUM);
-        tft_.setTextColor(kMuted, kBackground);
-        tft_.drawString(more, 10, y + 2, 1);
+        tft_.setTextColor(th.textFaint, th.surface);
+        tft_.drawString(more, static_cast<int16_t>(peersCard.x + 8), static_cast<int16_t>(y + 2), 1);
     }
 
-    drawButton(footer[0], "BACK");
-    drawButton(footer[1], "RESTART", false, kDanger);
+    const Rect restart = gatewayRestartButtonRect(width, height);
+    tft_.fillRoundRect(restart.x, restart.y, restart.w, restart.h, 10, th.danger);
+    tft_.drawRoundRect(restart.x, restart.y, restart.w, restart.h, 10, th.danger);
+    iconRestart(tft_, static_cast<int16_t>(restart.x + restart.w / 2 - 46), static_cast<int16_t>(restart.y + restart.h / 2), TFT_WHITE, th.danger);
+    tft_.setTextDatum(MC_DATUM);
+    tft_.setTextColor(TFT_WHITE, th.danger);
+    tft_.drawString("RESTART DEVICE", static_cast<int16_t>(restart.x + restart.w / 2 + 8), static_cast<int16_t>(restart.y + restart.h / 2), 2);
 }
 
 void BarcodeApplication::handleGatewayTouch(uint16_t x, uint16_t y) {
+    if (handleSubHeaderTouch(x, y, View::Home)) return;
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const auto footer = gatewayFooterButtons(width, height);
-    if (footer[0].contains(x, y, kTouchPad)) {
-        showHome();
-    } else if (footer[1].contains(x, y, kTouchPad)) {
+    if (gatewayRestartButtonRect(width, height).contains(x, y, kTouchPad)) {
         rebootDevice();
     }
 }

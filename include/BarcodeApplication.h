@@ -12,6 +12,7 @@
 #include "GatewayRelay.h"
 #include "PresetStore.h"
 #include "ScreenOrientation.h"
+#include "Theme.h"
 #include "UiRect.h"
 
 class BarcodeApplication {
@@ -94,8 +95,21 @@ private:
     bool renderCurrent(std::string& error);
     void setStatus(const std::string& status, bool redraw = true);
 
+    // Theming: the palette is derived from config_.darkTheme() rather than cached, so a toggle
+    // just needs a redraw -- there is no separate "current theme" state to keep in sync.
+    const uigeom::Theme& theme() const { return uigeom::themeFor(config_.darkTheme()); }
+    void toggleTheme();
+    void redrawView(View view);
+    // Shared chrome for every non-Home screen: a back chevron (optional), a title, and the
+    // theme toggle switch. Returns the y-coordinate content should start below.
+    int16_t drawSubHeader(const std::string& title, bool showBack = true);
+    bool handleSubHeaderTouch(uint16_t x, uint16_t y, View backTarget, bool hasBack = true);
+    void drawThemeSwitch(const Rect& rect);
+    void drawMiniSwitch(const Rect& rect, bool on);
+
     static const std::vector<espbarcode::Symbology>& supportedTypes();
     static std::string displayName(espbarcode::Symbology type);
+    static std::string symbologyHint(espbarcode::Symbology type);
 
     TFT_eSPI tft_;
     PresetStore presets_;

@@ -1,0 +1,6 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 480, "h": 320, "title": "ESP Barcode Device" }
+  ],
+  "launch": { "view": "focused", "file": "Main.dc.html" }
+}
