@@ -1,4 +1,6 @@
 #include "Fragmenter.h"
+#include "FrameAssembler.h"
+#include "GatewayBridge.h"
 
 #include <iostream>
 #include <numeric>
@@ -110,6 +112,76 @@ void test_fragment_indices_are_sequential() {
     }
 }
 
+void test_relay_header_preserves_session_and_swaps_profile_and_link_message_id() {
+    HopFrameHeader source;
+    source.trafficClass = TrafficClass::Bulk;
+    source.profileId = CarrierProfileId::StreamStandard;
+    source.routeId = 9;
+    source.linkSessionId = 123;
+    source.linkMessageId = 5;
+    source.linkCorrelationId = 456;
+    source.fragmentIndex = 2;
+    source.fragmentCount = 3;
+
+    const HopFrameHeader out = relayHeaderFor(source, CarrierProfileId::EspNowV1, 77);
+
+    CHECK(out.trafficClass == TrafficClass::Bulk);
+    CHECK(out.routeId == 9);
+    CHECK(out.linkSessionId == 123);
+    CHECK(out.linkCorrelationId == 456);
+    CHECK(out.profileId == CarrierProfileId::EspNowV1);
+    CHECK(out.linkMessageId == 77);
+}
+
+void test_gateway_relay_round_trip_usb_to_espnow_and_back() {
+    // Simulates GatewayRelay's actual job: a message arrives fragmented on one carrier,
+    // gets fully reassembled, then re-fragmented for the other carrier's frame ceiling,
+    // and must reassemble byte-identical on the far end.
+    HopFrameHeader usbHeader;
+    usbHeader.profileId = CarrierProfileId::StreamStandard;
+    usbHeader.linkSessionId = 1;
+    usbHeader.linkMessageId = 10;
+
+    std::vector<uint8_t> original(500);
+    std::iota(original.begin(), original.end(), uint8_t{0});
+
+    // Leg 1: arrives on USB as a single large frame (USB's ceiling is generous).
+    std::vector<std::vector<uint8_t>> usbFrames;
+    CodecError error;
+    CHECK(fragmentIntoHopFrames(original.data(), original.size(), usbHeader, 4096, usbFrames, error));
+    CHECK(usbFrames.size() == 1);
+
+    FrameAssembler usbAssembler;
+    HopFrameHeader decodedUsbHeader;
+    std::vector<uint8_t> usbPayload;
+    CodecError decodeError;
+    CHECK(decodeHopFrame(usbFrames[0].data(), usbFrames[0].size(), decodedUsbHeader, usbPayload, decodeError));
+    std::vector<uint8_t> reassembledFromUsb;
+    CHECK(usbAssembler.addFragment(decodedUsbHeader, usbPayload, reassembledFromUsb) == AssemblyOutcome::Complete);
+    CHECK(reassembledFromUsb == original);
+
+    // Relay leg: re-fragment for ESP-NOW's 250-byte ceiling with a fresh link-message id.
+    const HopFrameHeader espNowHeader = relayHeaderFor(decodedUsbHeader, CarrierProfileId::EspNowV1, 1);
+    std::vector<std::vector<uint8_t>> espNowFrames;
+    CHECK(fragmentIntoHopFrames(reassembledFromUsb.data(), reassembledFromUsb.size(), espNowHeader, 250,
+                                espNowFrames, error));
+    CHECK(espNowFrames.size() == 3);  // ceil(500/214)
+
+    // Leg 2: the far side reassembles the relayed fragments back to the original bytes.
+    FrameAssembler espNowAssembler;
+    std::vector<uint8_t> reassembledFromEspNow;
+    for (const auto& frame : espNowFrames) {
+        HopFrameHeader header;
+        std::vector<uint8_t> payload;
+        CHECK(decodeHopFrame(frame.data(), frame.size(), header, payload, decodeError));
+        CHECK(header.profileId == CarrierProfileId::EspNowV1);
+        CHECK(header.linkSessionId == 1);  // preserved from the source header
+        const AssemblyOutcome outcome = espNowAssembler.addFragment(header, payload, reassembledFromEspNow);
+        CHECK(outcome == (&frame == &espNowFrames.back() ? AssemblyOutcome::Complete : AssemblyOutcome::Incomplete));
+    }
+    CHECK(reassembledFromEspNow == original);
+}
+
 }  // namespace
 
 int main() {
@@ -118,6 +190,8 @@ int main() {
     test_single_fragment_when_message_fits();
     test_splits_across_espnow_v1_ceiling_and_reassembles();
     test_fragment_indices_are_sequential();
+    test_relay_header_preserves_session_and_swaps_profile_and_link_message_id();
+    test_gateway_relay_round_trip_usb_to_espnow_and_back();
     if (failures != 0) {
         std::cerr << failures << " esplink fragmenter test(s) failed\n";
         return EXIT_FAILURE;

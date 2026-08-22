@@ -39,6 +39,13 @@ void SerialLegacyEndpoint::loop() {
             } else if (!line_.empty()) {
                 processLine(line_);
                 line_.clear();
+                // "upgrade"/"gateway" hand this board's Serial bytes off to a different
+                // endpoint (SerialCobsEndpoint / GatewayRelay) starting on main.cpp's very
+                // next loop() iteration. Stop draining Serial here so any bytes that arrived
+                // during/after the ack -- the new endpoint's own opening COBS frame -- are
+                // left in the buffer for that endpoint to read, instead of this while loop
+                // consuming them as (corrupt) legacy JSON line content first.
+                if (upgradeRequested_ || gatewayRequested_) return;
             }
             continue;
         }
@@ -100,6 +107,22 @@ void SerialLegacyEndpoint::processLine(const std::string& line) {
         Serial.write('\n');
         Serial.flush();
         upgradeRequested_ = true;
+        return;
+    }
+
+    if (commandName == "gateway") {
+        // Same one-way switch as "upgrade" above, but into a pure USB<->ESP-NOW relay mode
+        // (GatewayRelay) instead of this board's own COBS v2 command dispatch -- see
+        // docs/PROTOCOL_V2.md §10. No revert to client mode without a reboot.
+        JsonDocument response;
+        response["ok"] = true;
+        response["cmd"] = "gateway";
+        response["message"] = "switching to USB<->ESP-NOW gateway relay mode";
+        if (request["id"] && !request["id"].isNull()) response["id"].set(request["id"]);
+        serializeJson(response, Serial);
+        Serial.write('\n');
+        Serial.flush();
+        gatewayRequested_ = true;
         return;
     }
 
