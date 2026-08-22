@@ -47,7 +47,19 @@ which is correct.
 One curve family serves both roles: the static identity key signs (ECDSA),
 and a fresh keypair on the same curve is generated per handshake for ECDH.
 
-**Handshake message 1 (`trust.pair.begin`, broadcast, plaintext):**
+**Handshake message 1 (`trust.pair.begin`, unicast, plaintext):** addressed to
+the specific MAC the initiator selected from the discovered-peers list (§4) —
+not broadcast. ESP-NOW requires a registered peer entry before `esp_now_send`
+will target a MAC, so both sides temporarily `esp_now_add_peer` each other
+unencrypted for the duration of the handshake (upgraded to an encrypted entry
+on success, removed on cancel/timeout). This also means the receive path must
+start keeping the sender MAC from the ESP-NOW callback for trust messages —
+today's endpoints discard it (`EspNowEndpoint::enqueueReceived`'s
+`(void)mac`), which was fine when every sender was equally untrusted but
+isn't once a specific reply needs to go back to a specific peer. Only the
+existing `gateway.link.ping`/`pong` discovery side-channel stays broadcast —
+that's how an initiator learns a candidate MAC exists before ever addressing
+it directly.
 ```
 { staticPubKey, ephemeralPubKey, nonce, signature = ECDSA_sign(staticPriv, ephemeralPubKey || nonce) }
 ```
