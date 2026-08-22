@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "EspBarcodeCore.h"
+#include "ScreenOrientation.h"
 
 namespace esplink {
 
@@ -64,13 +65,19 @@ struct DownloadCommand {
 };
 
 struct BacklightCommand { bool on = true; };
+
+struct OrientationCommand {
+    OrientationTarget target = OrientationTarget::Editor;
+    ScreenOrientation value = ScreenOrientation::Deg90;
+};
+
 struct RebootCommand {};
 
 using Command = std::variant<
     HelloCommand, CapabilitiesCommand, StatusCommand, GenerateCommand, DisplayCommand,
     CloseCommand, HomeCommand, SaveCommand, LoadCommand, DeleteCommand, ListCommand,
     UploadBeginCommand, UploadChunkCommand, UploadEndCommand, UploadAbortCommand,
-    DownloadCommand, BacklightCommand, RebootCommand>;
+    DownloadCommand, BacklightCommand, OrientationCommand, RebootCommand>;
 
 struct HelloResponse {
     std::string device;

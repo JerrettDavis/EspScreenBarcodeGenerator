@@ -155,6 +155,7 @@ The firmware never re-checks for `upgrade` once it's in COBS mode, and the v2 en
 | `barcode.generate` | `generate` | |
 | `barcode.close` | `close` | |
 | `device.backlight.set` | `backlight` | |
+| `device.orientation.set` | `orientation` | |
 
 Every other v2 name in the design plan's §8.9 namespaces — `system.capabilities`, `system.status`, `system.close`, `system.reboot`, `system.resume`, all of `barcode.display`/`barcode.home`/`barcode.current`, all of `preset.*`, all of `transfer.*`, `device.screen.wake`/`sleep`/`info`, all of `connectivity.*`, `trust.*`, `gateway.*`, and `diagnostics.*` — is **not implemented over v2** this release. `SerialCobsEndpoint::processMessage` returns `{"error":{"code":"unknown_command","message":"command not supported over EspLink v2 this release"}}` for any name that doesn't match the five above. The full v1 command set (18 commands, including presets, upload/download, and reboot) remains available by staying on v1 or by talking to the same board without sending `upgrade`.
 

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "EspBarcodeCore.h"
+#include "ScreenOrientation.h"
 
 namespace esplink {
 
@@ -47,6 +48,7 @@ public:
     virtual ~IDeviceControl() = default;
 
     virtual void setBacklight(bool on) = 0;
+    virtual void setOrientation(OrientationTarget target, ScreenOrientation value) = 0;
     virtual uint32_t freeHeapBytes() const = 0;
     // Triggers the actual restart. Implementations are responsible for flushing
     // any transport-specific stream (e.g. Serial.flush()) before restarting.

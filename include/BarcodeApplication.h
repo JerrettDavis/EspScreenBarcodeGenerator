@@ -7,8 +7,10 @@
 #include <string>
 #include <vector>
 
+#include "DeviceConfigStore.h"
 #include "EspBarcodeCore.h"
 #include "PresetStore.h"
+#include "ScreenOrientation.h"
 #include "UiRect.h"
 
 class BarcodeApplication {
@@ -29,6 +31,9 @@ public:
     void closeBarcode();
     void showHome(const std::string& status = {});
     void setBacklight(bool on);
+    void setOrientation(esplink::OrientationTarget target, esplink::ScreenOrientation value);
+    esplink::ScreenOrientation barcodeOrientation() const { return config_.barcodeOrientation(); }
+    esplink::ScreenOrientation editorOrientation() const { return config_.editorOrientation(); }
 
     const espbarcode::BarcodeSpec& activeSpec() const { return spec_; }
     const espbarcode::BarcodeResult& currentResult() const { return current_; }
@@ -45,21 +50,26 @@ public:
     using Rect = uigeom::Rect;
 
 private:
-    enum class View : uint8_t { Home, TypePicker, Options, Presets, Barcode };
+    enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcode };
     enum class KeyboardPage : uint8_t { Upper, Lower, Numeric, Symbols };
 
     void pollTouch();
+    bool readTouch(uint16_t& x, uint16_t& y);
     void handleTouch(uint16_t x, uint16_t y);
     void handleHomeTouch(uint16_t x, uint16_t y);
     void handleTypeTouch(uint16_t x, uint16_t y);
     void handleOptionsTouch(uint16_t x, uint16_t y);
     void handlePresetsTouch(uint16_t x, uint16_t y);
+    void handleSettingsTouch(uint16_t x, uint16_t y);
     void handleKeyboardTouch(uint16_t x, uint16_t y);
+
+    void applyOrientationForView(View view);
 
     void drawHome();
     void drawTypePicker();
     void drawOptions();
     void drawPresets();
+    void drawSettings();
     void drawKeyboard();
     void drawButton(const Rect& rect,
                     const std::string& text,
@@ -80,6 +90,8 @@ private:
 
     TFT_eSPI tft_;
     PresetStore presets_;
+    DeviceConfigStore config_;
+    esplink::ScreenOrientation appliedOrientation_ = esplink::ScreenOrientation::Deg90;
     espbarcode::BarcodeSpec spec_;
     espbarcode::BarcodeResult current_;
     bool hasCurrent_ = false;

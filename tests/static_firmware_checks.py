@@ -44,14 +44,14 @@ def main() -> int:
     if "lvgl" in ini.lower():
         raise AssertionError("platformio.ini: unused LVGL dependency must not be reintroduced")
     require(config, r"kTouchCalibration\[5\]\s*=\s*\{275,\s*3620,\s*264,\s*3532,\s*4\}", "app_config.h")
-    require(application, r"setRotation\(0\)", "BarcodeApplication.cpp")
+    require(application, r"applyOrientationForView", "BarcodeApplication.cpp")
     require(application, r"setTouch\(", "BarcodeApplication.cpp")
     require(application, r"modulePixels", "BarcodeApplication.cpp")
 
     commands = {
         "hello", "capabilities", "status", "generate", "display", "close", "home",
         "save", "load", "delete", "list", "upload_begin", "upload_chunk", "upload_end",
-        "upload_abort", "download", "backlight", "reboot",
+        "upload_abort", "download", "backlight", "orientation", "reboot",
     }
     missing = sorted(command for command in commands if f'command == "{command}"' not in protocol and f'"{command}"' not in protocol)
     if missing:

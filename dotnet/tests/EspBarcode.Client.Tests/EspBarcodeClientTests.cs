@@ -93,6 +93,21 @@ public class EspBarcodeClientTests
     }
 
     [Fact]
+    public void SetOrientation_SendsTargetAndValue()
+    {
+        var transport = new FakeTransport();
+        transport.Enqueue("""{"id":1,"ok":true,"cmd":"orientation","message":"orientation set: editor"}""");
+        using var client = new EspBarcodeClient(transport);
+
+        client.SetOrientation("editor", 1);
+
+        var sent = JsonDocument.Parse(transport.WrittenLines.Single());
+        Assert.Equal("orientation", sent.RootElement.GetProperty("cmd").GetString());
+        Assert.Equal("editor", sent.RootElement.GetProperty("target").GetString());
+        Assert.Equal(1, sent.RootElement.GetProperty("value").GetInt32());
+    }
+
+    [Fact]
     public void Generate_Gs1128_SendsFnc1TokenVerbatim()
     {
         var transport = new FakeTransport();

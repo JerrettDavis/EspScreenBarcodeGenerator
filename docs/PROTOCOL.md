@@ -210,10 +210,24 @@ Response:
 
 The device remains active. Turning the backlight off does not close or clear the current symbol.
 
+### `orientation`
+
+```json
+{"id":15,"cmd":"orientation","target":"editor","value":1}
+```
+
+Sets the panel rotation for either `target`: `"barcode"` (the full-screen barcode display) or `"editor"`
+(the on-device Home/type-picker/options/presets/settings/keyboard UI). `value` is `0`, `1`, `2`, or `3`,
+meaning 0°, 90°, 180°, or 270° respectively (matches TFT_eSPI's `setRotation`). The two targets are stored
+and applied independently; changing one does not affect the other. Defaults to `1` (90°, landscape) for
+both on first boot. The new rotation is applied live the next time that target's screen is drawn — e.g.
+setting `editor` while the barcode is on screen takes effect the next time `home`/`close` returns to the
+editor, while setting `editor` from the Settings screen re-renders immediately.
+
 ### `reboot`
 
 ```json
-{"id":15,"cmd":"reboot"}
+{"id":16,"cmd":"reboot"}
 ```
 
 The firmware sends its acknowledgement, flushes serial output, waits briefly, and restarts.

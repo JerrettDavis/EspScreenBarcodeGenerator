@@ -111,15 +111,23 @@ private:
 class FakeDeviceControl : public IDeviceControl {
 public:
     void setBacklight(bool on) override { backlightOn_ = on; }
+    void setOrientation(OrientationTarget target, ScreenOrientation value) override {
+        if (target == OrientationTarget::Barcode) barcodeOrientation_ = value;
+        else editorOrientation_ = value;
+    }
     uint32_t freeHeapBytes() const override { return 123456; }
     void reboot() override { rebooted_ = true; }
 
     bool backlightOn() const { return backlightOn_; }
     bool rebooted() const { return rebooted_; }
+    ScreenOrientation barcodeOrientation() const { return barcodeOrientation_; }
+    ScreenOrientation editorOrientation() const { return editorOrientation_; }
 
 private:
     bool backlightOn_ = true;
     bool rebooted_ = false;
+    ScreenOrientation barcodeOrientation_ = ScreenOrientation::Deg90;
+    ScreenOrientation editorOrientation_ = ScreenOrientation::Deg90;
 };
 
 void test_fake_barcode_device_generate_and_display() {
@@ -254,6 +262,30 @@ void test_close_home_backlight_match_golden_fixtures() {
     CHECK(std::get<SimpleOkResponse>(sink.responses[0]).message == "barcode closed");
     CHECK(std::get<SimpleOkResponse>(sink.responses[1]).message == "home screen displayed");
     CHECK(std::get<SimpleOkResponse>(sink.responses[2]).message == "backlight off");
+}
+
+void test_orientation_sets_barcode_and_editor_independently() {
+    FakeBarcodeDevice device;
+    FakePresetRepository presets;
+    FakeDeviceControl control;
+    ControlProtocolEngine engine(device, presets, control, "0.1.0-test");
+    ControlSession session{ControlSessionId{1}, ControllerId{1}};
+    RecordingSink sink;
+
+    CHECK(control.barcodeOrientation() == ScreenOrientation::Deg90);
+    CHECK(control.editorOrientation() == ScreenOrientation::Deg90);
+
+    engine.handle(session, OrientationCommand{OrientationTarget::Barcode, ScreenOrientation::Deg0},
+                  OperationId{1}, "usb-uart-ndjson", sink);
+    engine.handle(session, OrientationCommand{OrientationTarget::Editor, ScreenOrientation::Deg270},
+                  OperationId{2}, "usb-uart-ndjson", sink);
+
+    CHECK(control.barcodeOrientation() == ScreenOrientation::Deg0);
+    CHECK(control.editorOrientation() == ScreenOrientation::Deg270);
+    CHECK(sink.responses.size() == 2);
+    CHECK(std::get<SimpleOkResponse>(sink.responses[0]).command == "orientation");
+    CHECK(std::get<SimpleOkResponse>(sink.responses[0]).message == "orientation set: barcode");
+    CHECK(std::get<SimpleOkResponse>(sink.responses[1]).message == "orientation set: editor");
 }
 
 void test_upload_round_trip_matches_golden_fixtures() {
@@ -498,6 +530,7 @@ int main() {
     test_hello_matches_golden_fixture();
     test_status_no_current_matches_golden_fixture();
     test_close_home_backlight_match_golden_fixtures();
+    test_orientation_sets_barcode_and_editor_independently();
     test_upload_round_trip_matches_golden_fixtures();
     test_upload_chunk_wrong_offset_matches_golden_fixture();
     test_all_golden_fixtures_replay_correctly();

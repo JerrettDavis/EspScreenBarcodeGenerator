@@ -47,6 +47,7 @@ private:
     CommandResult handleUploadAbort(ControlSession& session);
     void handleDownload(const DownloadCommand& command, IControlResponseSink& sink) const;
     CommandResult handleBacklight(const BacklightCommand& command);
+    CommandResult handleOrientation(const OrientationCommand& command);
     CommandResult handleReboot();
 
     IBarcodeDevice& device_;

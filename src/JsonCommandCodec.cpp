@@ -274,6 +274,26 @@ bool JsonCommandCodec::decode(const std::string& commandName, JsonObjectConst re
         out = command;
         return true;
     }
+    if (commandName == "orientation") {
+        OrientationTarget target;
+        const char* targetText = request["target"] | "editor";
+        if (!tryParseOrientationTarget(targetText, target)) {
+            errorCode = "invalid_target";
+            errorMessage = "target must be 'barcode' or 'editor'";
+            return false;
+        }
+        ScreenOrientation orientation;
+        if (!tryParseScreenOrientation(request["value"] | -1, orientation)) {
+            errorCode = "invalid_value";
+            errorMessage = "value must be 0, 1, 2, or 3 (0/90/180/270 degrees)";
+            return false;
+        }
+        OrientationCommand command;
+        command.target = target;
+        command.value = orientation;
+        out = command;
+        return true;
+    }
     if (commandName == "reboot") {
         out = RebootCommand{};
         return true;

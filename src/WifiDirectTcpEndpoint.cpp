@@ -166,6 +166,7 @@ const char* WifiDirectTcpEndpoint::mapV2Name(const std::string& name) {
     if (name == "barcode.generate") return "generate";
     if (name == "barcode.close") return "close";
     if (name == "device.backlight.set") return "backlight";
+    if (name == "device.orientation.set") return "orientation";
     return nullptr;
 }
 

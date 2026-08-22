@@ -197,6 +197,13 @@ public sealed class EspBarcodeClient : IDisposable
 
     public void Backlight(bool on) => Request("backlight", new Dictionary<string, object?> { ["on"] = on });
 
+    /// <summary>
+    /// Sets the panel rotation (0/90/180/270 degrees) for either the barcode
+    /// display or the on-device editor UI, independently of one another.
+    /// </summary>
+    public void SetOrientation(string target, int value) =>
+        Request("orientation", new Dictionary<string, object?> { ["target"] = target, ["value"] = value });
+
     public void Reboot() => Request("reboot");
 
     /// <summary>

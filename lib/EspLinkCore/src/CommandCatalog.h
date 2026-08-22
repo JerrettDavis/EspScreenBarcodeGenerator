@@ -32,6 +32,7 @@ inline constexpr CommandDescriptor kCommandCatalog[] = {
     {"upload_abort",   TrafficClass::Bulk,     Idempotency::Idempotent,   false},
     {"download",       TrafficClass::Bulk,     Idempotency::Query,        false},
     {"backlight",      TrafficClass::Control,  Idempotency::Idempotent,   false},
+    {"orientation",    TrafficClass::Control,  Idempotency::Idempotent,   false},
     {"reboot",         TrafficClass::Critical, Idempotency::ReplayResult, false},
 };
 // clang-format on

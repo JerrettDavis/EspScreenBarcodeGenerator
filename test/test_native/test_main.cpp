@@ -106,15 +106,19 @@ void test_random_payload_always_encodes() {
 }
 
 void test_home_button_layout_has_no_overlaps_and_fits_screen() {
-    // Mirrors the home-screen button layout in BarcodeApplication.cpp.
+    // Mirrors the portrait (default 0/180-orientation) home-screen button
+    // layout in BarcodeApplication.cpp. The OPTIONS/PRESETS/DISPLAY/RANDOM/
+    // SETTINGS row is 5 evenly-distributed buttons (was 4, before per-screen
+    // orientation added a Settings entry point).
     static constexpr Rect kButtons[] = {
         {8, 38, 150, 38},    // TYPE
         {166, 38, 70, 38},   // CLEAR
         {244, 38, 68, 38},   // SAVE
-        {8, 176, 70, 38},    // OPTIONS
-        {86, 176, 70, 38},   // PRESETS
-        {164, 176, 70, 38},  // DISPLAY
-        {242, 176, 70, 38},  // RANDOM
+        {8, 176, 54, 38},    // OPTIONS
+        {70, 176, 54, 38},   // PRESETS
+        {132, 176, 54, 38},  // DISPLAY
+        {194, 176, 54, 38},  // RANDOM
+        {256, 176, 54, 38},  // SETTINGS
     };
     constexpr int16_t kScreenWidth = 320;
     constexpr std::size_t kCount = sizeof(kButtons) / sizeof(kButtons[0]);
@@ -126,6 +130,37 @@ void test_home_button_layout_has_no_overlaps_and_fits_screen() {
     for (std::size_t i = 0; i < kCount; ++i) {
         for (std::size_t j = i + 1; j < kCount; ++j) {
             TEST_ASSERT_FALSE_MESSAGE(uigeom::overlaps(kButtons[i], kButtons[j]), "home screen buttons overlap");
+        }
+    }
+}
+
+void test_landscape_home_button_layout_has_no_overlaps_and_fits_screen() {
+    // Mirrors the landscape (90/270-orientation) home-screen layout, which
+    // is now the default: 480x320 instead of 320x480.
+    static constexpr Rect kButtons[] = {
+        {8, 32, 260, 30},   // TYPE
+        {276, 32, 96, 30},  // CLEAR
+        {380, 32, 88, 30},  // SAVE
+        {8, 130, 86, 32},   // OPTIONS
+        {102, 130, 86, 32}, // PRESETS
+        {196, 130, 86, 32}, // DISPLAY
+        {290, 130, 86, 32}, // RANDOM
+        {384, 130, 86, 32}, // SETTINGS
+    };
+    constexpr int16_t kScreenWidth = 480;
+    constexpr int16_t kScreenHeight = 320;
+    constexpr std::size_t kCount = sizeof(kButtons) / sizeof(kButtons[0]);
+
+    for (const Rect& r : kButtons) {
+        TEST_ASSERT_TRUE(r.x >= 0);
+        TEST_ASSERT_TRUE(r.y >= 0);
+        TEST_ASSERT_TRUE(r.x + r.w <= kScreenWidth);
+        TEST_ASSERT_TRUE(r.y + r.h <= kScreenHeight);
+    }
+    for (std::size_t i = 0; i < kCount; ++i) {
+        for (std::size_t j = i + 1; j < kCount; ++j) {
+            TEST_ASSERT_FALSE_MESSAGE(uigeom::overlaps(kButtons[i], kButtons[j]),
+                                      "landscape home screen buttons overlap");
         }
     }
 }
@@ -166,6 +201,7 @@ int main(int, char**) {
     RUN_TEST(test_pixel_exact_layout);
     RUN_TEST(test_random_payload_always_encodes);
     RUN_TEST(test_home_button_layout_has_no_overlaps_and_fits_screen);
+    RUN_TEST(test_landscape_home_button_layout_has_no_overlaps_and_fits_screen);
     RUN_TEST(test_touch_pad_closes_gap_without_crossing_neighbor);
     return UNITY_END();
 }

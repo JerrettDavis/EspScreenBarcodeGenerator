@@ -26,7 +26,7 @@ USB cable -> USB-to-UART bridge -> NDJSON (v1, default) or COBS hop frames (v2, 
                    v                                v
      BarcodeApplicationAdapter (Arduino)   EspIdfDeviceControl (Arduino)
      (implements IBarcodeDevice,           (implements IDeviceControl:
-      IPresetRepository)                    backlight, reboot, free heap)
+      IPresetRepository)                    backlight, orientation, reboot, free heap)
                    |
                    v
                 BarcodeApplication (state + workflows)
@@ -130,7 +130,21 @@ A later Windows service, virtual device driver, WebSerial client, TCP bridge, Bl
 
 LittleFS uses the final 960 KiB of the custom 4 MiB partition table. Each preset is a JSON file under `/presets`. Names are restricted to 1-24 alphanumeric, dash, or underscore characters. The UI automatically selects `SLOT01` through `SLOT32`; USB callers may use meaningful names.
 
+`DeviceConfigStore` persists device-wide (non-preset) settings — currently just the barcode/editor screen orientation — as a single JSON file at `/config/device.json`, mirroring `PresetStore`'s LittleFS/ArduinoJson pattern. It defaults to 90° (landscape) for both targets on first boot.
+
 The mount currently permits format-on-failure to make first boot self-initializing. A production qualification should verify power-loss behavior and decide whether formatting on an unexpected mount failure is acceptable for the lab process.
+
+## Screen orientation
+
+The barcode display and the on-device editor (Home/type-picker/options/presets/settings/keyboard) each
+have an independently configurable rotation (0/90/180/270°), set via the `orientation` protocol command
+or the on-device Settings screen, and persisted by `DeviceConfigStore`. `BarcodeApplication` tracks which
+rotation is currently applied to the panel (`appliedOrientation_`) and calls `tft_.setRotation()` only
+when the screen it's about to draw (`applyOrientationForView`) wants a different one than what's already
+applied — so the panel rotates live as the user switches between the barcode display and the editor, or
+when an orientation setting changes. All editor screen layouts are computed from the *current*
+`tft_.width()/height()` rather than a fixed 320x480 assumption, since those dimensions swap between
+portrait and landscape rotations.
 
 ## Error strategy
 

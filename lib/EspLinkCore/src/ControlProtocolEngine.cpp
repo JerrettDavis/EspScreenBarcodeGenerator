@@ -27,6 +27,7 @@ const char* commandCatalogName(const Command& command) {
         const char* operator()(const UploadAbortCommand&) const { return "upload_abort"; }
         const char* operator()(const DownloadCommand&) const { return "download"; }
         const char* operator()(const BacklightCommand&) const { return "backlight"; }
+        const char* operator()(const OrientationCommand&) const { return "orientation"; }
         const char* operator()(const RebootCommand&) const { return "reboot"; }
     };
     return std::visit(Visitor{}, command);
@@ -91,6 +92,7 @@ ControlProtocolEngine::CommandResult ControlProtocolEngine::dispatchSingle(Contr
     if (std::holds_alternative<UploadEndCommand>(command)) return handleUploadEnd(session, std::get<UploadEndCommand>(command));
     if (std::holds_alternative<UploadAbortCommand>(command)) return handleUploadAbort(session);
     if (std::holds_alternative<BacklightCommand>(command)) return handleBacklight(std::get<BacklightCommand>(command));
+    if (std::holds_alternative<OrientationCommand>(command)) return handleOrientation(std::get<OrientationCommand>(command));
     if (std::holds_alternative<RebootCommand>(command)) return handleReboot();
     return ProtocolError{"", "unknown_command", "unsupported command"};
 }
@@ -329,6 +331,11 @@ void ControlProtocolEngine::handleDownload(const DownloadCommand& command, ICont
 ControlProtocolEngine::CommandResult ControlProtocolEngine::handleBacklight(const BacklightCommand& command) {
     deviceControl_.setBacklight(command.on);
     return Response{SimpleOkResponse{"backlight", command.on ? "backlight on" : "backlight off"}};
+}
+
+ControlProtocolEngine::CommandResult ControlProtocolEngine::handleOrientation(const OrientationCommand& command) {
+    deviceControl_.setOrientation(command.target, command.value);
+    return Response{SimpleOkResponse{"orientation", std::string("orientation set: ") + toString(command.target)}};
 }
 
 ControlProtocolEngine::CommandResult ControlProtocolEngine::handleReboot() {
