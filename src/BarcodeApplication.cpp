@@ -130,6 +130,14 @@ Rect homeGatewayButtonRect(uint16_t width, uint16_t height) {
     return Rect{8, static_cast<int16_t>(title.h + 28), static_cast<int16_t>(width - 16), 56};
 }
 
+// Gateway relay mode is a one-way switch (see main.cpp) -- the only in-device way back to the
+// normal ESP Barcode Lab screen is a restart, so this button is always reachable from Home
+// without first going through the stats screen.
+Rect homeGatewayRestartButtonRect(uint16_t width, uint16_t height) {
+    const Rect statsButton = homeGatewayButtonRect(width, height);
+    return Rect{statsButton.x, static_cast<int16_t>(statsButton.y + statsButton.h + 10), statsButton.w, 40};
+}
+
 struct KeyboardMetrics {
     int16_t top;
     int16_t rowHeight;
@@ -359,6 +367,16 @@ void BarcodeApplication::updateGatewayStats(const esplink::GatewayRelay::Stats& 
     drawGateway();
 }
 
+void BarcodeApplication::rebootDevice() {
+    // Gateway relay mode is a one-way switch (main.cpp never reverts `active` back to
+    // ActiveTransport::Legacy), so a restart is the only in-device way back to the normal ESP
+    // Barcode Lab screen -- same sequence as the existing device.reboot protocol command
+    // (EspIdfDeviceControl::reboot).
+    Serial.flush();
+    delay(100);
+    ESP.restart();
+}
+
 void BarcodeApplication::drawHome() {
     applyOrientationForView(View::Home);
     const uint16_t width = tft_.width();
@@ -406,6 +424,7 @@ void BarcodeApplication::drawGatewayHomeBanner() {
     tft_.drawString(clipped(status_, maxChars).c_str(), 8, title.h + 10, 1);
 
     drawButton(homeGatewayButtonRect(width, tft_.height()), "VIEW GATEWAY STATS", true, kAccentDark);
+    drawButton(homeGatewayRestartButtonRect(width, tft_.height()), "RESTART DEVICE", false, kDanger);
 }
 
 void BarcodeApplication::drawDataPreview() {
@@ -497,6 +516,8 @@ void BarcodeApplication::handleHomeTouch(uint16_t x, uint16_t y) {
             view_ = View::Gateway;
             gatewayStatsRedrawAt_ = 0;  // force an immediate draw rather than waiting for the next throttled refresh
             drawGateway();
+        } else if (homeGatewayRestartButtonRect(width, height).contains(x, y, kTouchPad)) {
+            rebootDevice();
         }
         return;
     }
@@ -967,6 +988,17 @@ void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
 namespace {
 constexpr int16_t kGatewayBackButtonHeight = 40;
 
+// BACK (left) returns to the Home banner without leaving gateway mode; RESTART (right) is the
+// only in-device way back to the normal ESP Barcode Lab screen, since gateway mode is a one-way
+// switch (see main.cpp).
+std::array<Rect, 2> gatewayFooterButtons(uint16_t width, uint16_t height) {
+    const int16_t y = static_cast<int16_t>(height - kGatewayBackButtonHeight - 6);
+    const int16_t gap = 8;
+    const int16_t buttonW = static_cast<int16_t>((static_cast<int>(width) - 16 - gap) / 2);
+    return {Rect{8, y, buttonW, kGatewayBackButtonHeight},
+            Rect{static_cast<int16_t>(8 + buttonW + gap), y, buttonW, kGatewayBackButtonHeight}};
+}
+
 std::string formatMac(const std::array<uint8_t, 6>& mac) {
     char buf[24];
     std::snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -1027,11 +1059,11 @@ void BarcodeApplication::drawGateway() {
     tft_.drawFastHLine(8, y, static_cast<int16_t>(width - 16), kPanelAlt);
     y = static_cast<int16_t>(y + 8);
 
-    const int16_t backY = static_cast<int16_t>(height - kGatewayBackButtonHeight - 6);
+    const auto footer = gatewayFooterButtons(width, height);
     const int16_t peerRowH = static_cast<int16_t>(wide ? 16 : 18);
     std::size_t shown = 0;
     for (; shown < link.peerCount; ++shown) {
-        if (y + peerRowH > backY - 4) break;
+        if (y + peerRowH > footer[0].y - 4) break;
         const auto& peer = link.peers[shown];
         tft_.setTextDatum(TL_DATUM);
         tft_.setTextColor(kText, kBackground);
@@ -1049,15 +1081,18 @@ void BarcodeApplication::drawGateway() {
         tft_.drawString(more, 10, y + 2, 1);
     }
 
-    drawButton({8, backY, static_cast<int16_t>(width - 16), kGatewayBackButtonHeight}, "BACK");
+    drawButton(footer[0], "BACK");
+    drawButton(footer[1], "RESTART", false, kDanger);
 }
 
 void BarcodeApplication::handleGatewayTouch(uint16_t x, uint16_t y) {
-    (void)x;
+    const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    const int16_t backY = static_cast<int16_t>(height - kGatewayBackButtonHeight - 6);
-    if (y >= static_cast<uint16_t>(backY - kTouchPad)) {
+    const auto footer = gatewayFooterButtons(width, height);
+    if (footer[0].contains(x, y, kTouchPad)) {
         showHome();
+    } else if (footer[1].contains(x, y, kTouchPad)) {
+        rebootDevice();
     }
 }
 

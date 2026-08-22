@@ -68,6 +68,7 @@ private:
     void handleSettingsTouch(uint16_t x, uint16_t y);
     void handleKeyboardTouch(uint16_t x, uint16_t y);
     void handleGatewayTouch(uint16_t x, uint16_t y);
+    void rebootDevice();
 
     void applyOrientationForView(View view);
 
