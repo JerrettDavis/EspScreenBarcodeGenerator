@@ -1,5 +1,6 @@
 #include <Arduino.h>
 
+#include <array>
 #include <string>
 
 #include "BarcodeApplication.h"
@@ -106,12 +107,64 @@ void loop() {
         gatewayRelay.loop();
         if (application.consumeGatewayPingRequest()) gatewayRelay.pingNow();
         application.updateGatewayStats(gatewayRelay.stats());
+
+        // Secure Pairing (Task 8): shuttle Trust-screen requests to/from GatewayRelay's pairing
+        // API, mirroring the ping/stats plumbing just above.
+        std::array<uint8_t, 6> pairTarget{};
+        if (application.consumeTrustPairRequest(pairTarget)) gatewayRelay.beginPairing(pairTarget);
+        if (application.consumeTrustConfirmRequest()) gatewayRelay.confirmPairing();
+        if (application.consumeTrustDenyRequest()) gatewayRelay.denyPairing();
+        std::string forgetFingerprint;
+        if (application.consumeTrustForgetRequest(forgetFingerprint)) {
+            gatewayRelay.forgetByFingerprint(forgetFingerprint);
+        }
+        const auto gwStatus = gatewayRelay.pairingStatus();
+        application.updateTrustPairingStatus(gwStatus.state == esplink::GatewayRelay::TrustPairingUiState::Discovering,
+                                             gwStatus.peerFingerprint, gwStatus.numericCode,
+                                             gwStatus.state == esplink::GatewayRelay::TrustPairingUiState::Committed,
+                                             gwStatus.state == esplink::GatewayRelay::TrustPairingUiState::Cancelled);
+        application.updateGatewayRelayTrustedPeers(gatewayRelay.fingerprintList(), gatewayRelay.macList());
+        bool toggleValue = false;
+        if (application.consumeSecurePairingToggleRequest(toggleValue)) {
+            std::string toggleError;
+            if (!gatewayRelay.setSecurePairingEnabled(toggleValue, toggleError)) {
+                // Persistence failed: revert the optimistic display flip back to what's actually
+                // in effect.
+                application.refreshSecurePairingEnabled(gatewayRelay.securePairingEnabled());
+            }
+        }
     }
     // GatewayRelayMode owns the ESP-NOW receive callback itself (see above); espNowEndpoint's
     // own loop() would just drain an empty queue, but skip it anyway for clarity.
     if (active != ActiveTransport::GatewayRelayMode) {
         espNowEndpoint.loop();
         application.updateGatewayLinkStatus(espNowEndpoint.gatewayLinkStatus());
+
+        // Mirror-image Secure Pairing wiring for the direct (non-gateway) path, targeting
+        // espNowEndpoint instead of gatewayRelay -- this also runs during Legacy/CobsV2 modes
+        // (same condition updateGatewayLinkStatus already uses above), so Trust/Secure Pairing
+        // work identically regardless of which serial transport happens to be active.
+        std::array<uint8_t, 6> directPairTarget{};
+        if (application.consumeTrustPairRequest(directPairTarget)) espNowEndpoint.beginPairing(directPairTarget);
+        if (application.consumeTrustConfirmRequest()) espNowEndpoint.confirmPairing();
+        if (application.consumeTrustDenyRequest()) espNowEndpoint.denyPairing();
+        std::string directForgetFingerprint;
+        if (application.consumeTrustForgetRequest(directForgetFingerprint)) {
+            espNowEndpoint.forgetByFingerprint(directForgetFingerprint);
+        }
+        const auto directStatus = espNowEndpoint.pairingStatus();
+        application.updateTrustPairingStatus(directStatus.state == esplink::EspNowEndpoint::TrustPairingUiState::Discovering,
+                                             directStatus.peerFingerprint, directStatus.numericCode,
+                                             directStatus.state == esplink::EspNowEndpoint::TrustPairingUiState::Committed,
+                                             directStatus.state == esplink::EspNowEndpoint::TrustPairingUiState::Cancelled);
+        application.updateEspNowTrustedPeers(espNowEndpoint.fingerprintList(), espNowEndpoint.macList());
+        bool directToggleValue = false;
+        if (application.consumeSecurePairingToggleRequest(directToggleValue)) {
+            std::string toggleError;
+            if (!espNowEndpoint.setSecurePairingEnabled(directToggleValue, toggleError)) {
+                application.refreshSecurePairingEnabled(espNowEndpoint.securePairingEnabled());
+            }
+        }
     }
     bleEndpoint.loop();
     wifiDirectEndpoint.loop();

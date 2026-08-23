@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -45,6 +46,31 @@ public:
     // since the last call -- main.cpp polls this each loop() iteration, same pattern as
     // SerialLegacyEndpoint::gatewayRequested().
     bool consumeGatewayPingRequest();
+
+    // Secure Pairing (docs/superpowers/specs/2026-08-22-espnow-secure-pairing-design.md) --
+    // fed every loop() iteration from whichever of EspNowEndpoint's/GatewayRelay's identical
+    // pairing APIs is currently active (see main.cpp).
+    void updateTrustPairingStatus(bool discovering, const std::string& peerFingerprint, uint32_t numericCode,
+                                  bool committed, bool cancelled);
+    // fingerprints/macs are parallel arrays, same order/length -- see GatewayRelay::fingerprintList()/
+    // macList() (Task 7) and EspNowEndpoint's identical pair (Task 6).
+    void updateGatewayRelayTrustedPeers(const std::vector<std::string>& fingerprints,
+                                        const std::vector<std::array<uint8_t, 6>>& macs);
+    void updateEspNowTrustedPeers(const std::vector<std::string>& fingerprints,
+                                  const std::vector<std::array<uint8_t, 6>>& macs);
+    bool consumeTrustPairRequest(std::array<uint8_t, 6>& outTargetMac);  // "Pair new device" tapped
+    bool consumeTrustConfirmRequest();
+    bool consumeTrustDenyRequest();
+    bool consumeTrustForgetRequest(std::string& outFingerprint);
+    // Tapped the Secure Pairing switch in Settings -- flips the locally-cached display value
+    // immediately (so the switch redraws right away) and sets outValue for main.cpp to push into
+    // whichever of EspNowEndpoint's/GatewayRelay's TrustConfigStore is actually active (see
+    // main.cpp's loop()); BarcodeApplication has no TrustConfigStore of its own, only this
+    // cached display flag.
+    bool consumeSecurePairingToggleRequest(bool& outValue);
+    void refreshSecurePairingEnabled(bool value) { securePairingEnabled_ = value; }  // reflects a push from main.cpp
+    bool securePairingEnabled() const { return securePairingEnabled_; }
+
     void setOrientation(esplink::OrientationTarget target, esplink::ScreenOrientation value);
     esplink::ScreenOrientation barcodeOrientation() const { return config_.barcodeOrientation(); }
     esplink::ScreenOrientation editorOrientation() const { return config_.editorOrientation(); }
@@ -64,7 +90,7 @@ public:
     using Rect = uigeom::Rect;
 
 private:
-    enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcode, Gateway };
+    enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcode, Gateway, Trust };
     enum class KeyboardPage : uint8_t { Upper, Lower, Numeric, Symbols };
 
     void pollTouch();
@@ -77,6 +103,7 @@ private:
     void handleSettingsTouch(uint16_t x, uint16_t y);
     void handleKeyboardTouch(uint16_t x, uint16_t y);
     void handleGatewayTouch(uint16_t x, uint16_t y);
+    void handleTrustTouch(uint16_t x, uint16_t y);
     void rebootDevice();
 
     void applyOrientationForView(View view);
@@ -88,6 +115,7 @@ private:
     void drawPresets();
     void drawSettings();
     void drawGateway();
+    void drawTrust();
     void drawKeyboard();
     void drawButton(const Rect& rect,
                     const std::string& text,
@@ -149,4 +177,33 @@ private:
     // This board's own gateway-discovery state (client role) -- see updateGatewayLinkStatus.
     esplink::GatewayLinkInfo gatewayLinkStatus_{};
     uint32_t gatewayLinkRedrawAt_ = 0;
+
+    // Secure Pairing / Trust screen state -- see updateTrustPairingStatus/consumeTrust*
+    // above and main.cpp's loop() for how these are fed from whichever of
+    // EspNowEndpoint/GatewayRelay is currently active.
+    bool securePairingEnabled_ = false;
+    bool securePairingToggleRequested_ = false;
+    bool securePairingToggleValue_ = false;
+    bool trustPairRequested_ = false;
+    std::array<uint8_t, 6> trustPairTargetMac_{};
+    bool trustConfirmRequested_ = false;
+    bool trustDenyRequested_ = false;
+    bool trustForgetRequested_ = false;
+    std::string trustForgetFingerprint_;
+    bool trustDiscovering_ = false;
+    std::string trustPeerFingerprint_;
+    uint32_t trustNumericCode_ = 0;
+    bool trustCommitted_ = false;
+    bool trustCancelled_ = false;
+
+    // One fingerprint + MAC pair per trusted record, zipped together from fingerprintList()/
+    // macList() each loop() tick (see updateGatewayRelayTrustedPeers/updateEspNowTrustedPeers)
+    // so drawTrust()/handleTrustTouch() can compare a discovered peer's MAC against
+    // already-trusted MACs directly, without string-comparing fingerprints.
+    struct TrustPeerRow {
+        std::string fingerprint;
+        std::array<uint8_t, 6> mac{};
+    };
+    std::vector<TrustPeerRow> gatewayRelayTrustedPeers_;
+    std::vector<TrustPeerRow> espNowTrustedPeers_;
 };

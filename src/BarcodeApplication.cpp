@@ -435,6 +435,38 @@ std::string formatAgeSeconds(uint32_t nowMs, uint32_t lastSeenMs) {
     return buf;
 }
 
+// ---- Settings -> Trust navigation button ----
+
+// y-coordinate right below whatever Settings currently renders below the orientation/pairing
+// card -- the ESP-NOW gateway-link status row when this board is a plain client, or just the
+// card itself in gateway mode (see drawSettings()).
+int16_t settingsContentBottomY(uint16_t width, const Rect& card, bool gatewayModeActive) {
+    if (gatewayModeActive) return static_cast<int16_t>(card.y + card.h);
+    const Rect linkRow = gatewayLinkStatusRowRect(width, static_cast<int16_t>(card.y + card.h));
+    return static_cast<int16_t>(linkRow.y + linkRow.h);
+}
+
+Rect settingsTrustButtonRect(uint16_t width, const Rect& card, bool gatewayModeActive) {
+    const int16_t y = static_cast<int16_t>(settingsContentBottomY(width, card, gatewayModeActive) + 10);
+    return Rect{8, y, static_cast<int16_t>(width - 16), 36};
+}
+
+// ---- Trust screen ----
+
+// This file duplicates small MAC-formatting helpers per class rather than sharing them --
+// see formatMac's independent copies in EspNowEndpoint.cpp/GatewayRelay.cpp. macFromString is
+// the inverse of those: parsing a "AA:BB:CC:DD:EE:FF"-formatted string (as stored in
+// GatewayLinkInfo::gatewayId/GatewayStats::Peer::mac's formatted form) back into raw bytes.
+bool macFromString(const std::string& text, std::array<uint8_t, 6>& out) {
+    unsigned values[6];
+    if (std::sscanf(text.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x", &values[0], &values[1], &values[2], &values[3],
+                    &values[4], &values[5]) != 6) {
+        return false;
+    }
+    for (int i = 0; i < 6; ++i) out[static_cast<std::size_t>(i)] = static_cast<uint8_t>(values[i]);
+    return true;
+}
+
 }  // namespace
 
 const std::vector<Symbology>& BarcodeApplication::supportedTypes() {
@@ -542,6 +574,7 @@ void BarcodeApplication::redrawView(View view) {
         case View::Presets: drawPresets(); break;
         case View::Settings: drawSettings(); break;
         case View::Gateway: drawGateway(); break;
+        case View::Trust: drawTrust(); break;
         case View::Barcode: break;  // always white/black regardless of theme; nothing to restyle
     }
 }
@@ -625,6 +658,7 @@ void BarcodeApplication::handleTouch(uint16_t x, uint16_t y) {
         case View::Presets: handlePresetsTouch(x, y); break;
         case View::Settings: handleSettingsTouch(x, y); break;
         case View::Gateway: handleGatewayTouch(x, y); break;
+        case View::Trust: handleTrustTouch(x, y); break;
         case View::Barcode:
             if (millis() - barcodeShownAt_ >= app_config::kTouchCloseGuardMs) closeBarcode();
             break;
@@ -737,6 +771,76 @@ void BarcodeApplication::updateGatewayLinkStatus(const esplink::GatewayLinkInfo&
 bool BarcodeApplication::consumeGatewayPingRequest() {
     if (!gatewayPingRequested_) return false;
     gatewayPingRequested_ = false;
+    return true;
+}
+
+void BarcodeApplication::updateTrustPairingStatus(bool discovering, const std::string& peerFingerprint,
+                                                  uint32_t numericCode, bool committed, bool cancelled) {
+    // pairingStatus() only populates peerFingerprint/numericCode while AwaitingApproval -- once
+    // the attempt reaches Committed/Cancelled they come back empty/0 again, which is exactly
+    // what makes drawTrust()'s condition (trustDiscovering_ || !trustPeerFingerprint_.empty())
+    // fall back to the idle pair-button+list layout on its own. Only redraw when something
+    // actually changed, so the Trust screen isn't fully repainted every loop() tick.
+    const bool changed = discovering != trustDiscovering_ || peerFingerprint != trustPeerFingerprint_ ||
+                         numericCode != trustNumericCode_ || committed != trustCommitted_ ||
+                         cancelled != trustCancelled_;
+    trustDiscovering_ = discovering;
+    trustPeerFingerprint_ = peerFingerprint;
+    trustNumericCode_ = numericCode;
+    trustCommitted_ = committed;
+    trustCancelled_ = cancelled;
+    if (changed && view_ == View::Trust) drawTrust();
+}
+
+void BarcodeApplication::updateGatewayRelayTrustedPeers(const std::vector<std::string>& fingerprints,
+                                                        const std::vector<std::array<uint8_t, 6>>& macs) {
+    gatewayRelayTrustedPeers_.clear();
+    for (std::size_t i = 0; i < fingerprints.size(); ++i) {
+        gatewayRelayTrustedPeers_.push_back(TrustPeerRow{fingerprints[i], macs[i]});
+    }
+}
+
+void BarcodeApplication::updateEspNowTrustedPeers(const std::vector<std::string>& fingerprints,
+                                                  const std::vector<std::array<uint8_t, 6>>& macs) {
+    espNowTrustedPeers_.clear();
+    for (std::size_t i = 0; i < fingerprints.size(); ++i) {
+        espNowTrustedPeers_.push_back(TrustPeerRow{fingerprints[i], macs[i]});
+    }
+}
+
+bool BarcodeApplication::consumeTrustPairRequest(std::array<uint8_t, 6>& outTargetMac) {
+    if (!trustPairRequested_) return false;
+    trustPairRequested_ = false;
+    outTargetMac = trustPairTargetMac_;
+    return true;
+}
+
+bool BarcodeApplication::consumeTrustConfirmRequest() {
+    if (!trustConfirmRequested_) return false;
+    trustConfirmRequested_ = false;
+    return true;
+}
+
+bool BarcodeApplication::consumeTrustDenyRequest() {
+    if (!trustDenyRequested_) return false;
+    trustDenyRequested_ = false;
+    return true;
+}
+
+bool BarcodeApplication::consumeTrustForgetRequest(std::string& outFingerprint) {
+    if (!trustForgetRequested_) return false;
+    trustForgetRequested_ = false;
+    outFingerprint = trustForgetFingerprint_;
+    return true;
+}
+
+bool BarcodeApplication::consumeSecurePairingToggleRequest(bool& outValue) {
+    if (!securePairingToggleRequested_) return false;
+    securePairingToggleRequested_ = false;
+    outValue = securePairingToggleValue_;
+    securePairingEnabled_ = securePairingToggleValue_;  // optimistic UI update; already applied at
+                                                          // tap time in handleSettingsTouch, so this
+                                                          // just keeps main.cpp's corrective path simple
     return true;
 }
 
@@ -1385,7 +1489,7 @@ void BarcodeApplication::drawSettings() {
     const Rect card = settingsCardRect(width, height, contentTop);
     tft_.fillRoundRect(card.x, card.y, card.w, card.h, 12, th.surface);
     tft_.drawRoundRect(card.x, card.y, card.w, card.h, 12, th.hairline);
-    const int16_t rowH = static_cast<int16_t>(card.h / 2);
+    const int16_t rowH = static_cast<int16_t>(card.h / 3);
     for (int row = 0; row < 2; ++row) {
         const int16_t y = static_cast<int16_t>(card.y + row * rowH);
         if (row > 0) tft_.drawFastHLine(static_cast<int16_t>(card.x + 2), y, static_cast<int16_t>(card.w - 4), th.hairline);
@@ -1397,6 +1501,19 @@ void BarcodeApplication::drawSettings() {
         const std::string label =
             std::string("<  ") + orientationLabel(rows[static_cast<std::size_t>(row)].second) + " deg  >";
         tft_.drawString(label.c_str(), static_cast<int16_t>(card.x + card.w - 14), static_cast<int16_t>(y + rowH / 2), 2);
+    }
+
+    // Row 3: Secure Pairing toggle -- reuses drawMiniSwitch, already used for Options' switch
+    // rows (Invert Colors/Checksum). See consumeSecurePairingToggleRequest for how a tap here
+    // flows through to whichever of EspNowEndpoint's/GatewayRelay's TrustConfigStore is active.
+    {
+        const int16_t y = static_cast<int16_t>(card.y + 2 * rowH);
+        tft_.drawFastHLine(static_cast<int16_t>(card.x + 2), y, static_cast<int16_t>(card.w - 4), th.hairline);
+        tft_.setTextDatum(ML_DATUM);
+        tft_.setTextColor(th.text, th.surface);
+        tft_.drawString("Secure Pairing", static_cast<int16_t>(card.x + 12), static_cast<int16_t>(y + rowH / 2), 2);
+        const Rect sw{static_cast<int16_t>(card.x + card.w - 42), static_cast<int16_t>(y + rowH / 2 - 9), 30, 18};
+        drawMiniSwitch(sw, securePairingEnabled_);
     }
 
     // Gateway relay mode has its own live stats screen (View::Gateway) for this board's own
@@ -1421,6 +1538,10 @@ void BarcodeApplication::drawSettings() {
         }
         tft_.drawString(label.c_str(), static_cast<int16_t>(linkRow.x + 28), static_cast<int16_t>(linkRow.y + linkRow.h / 2), 1);
     }
+
+    // "Trust" navigation button below whatever else this screen rendered -- same accent-button
+    // shape as drawGatewayHomeBanner's button-to-View::Gateway pattern.
+    drawButton(settingsTrustButtonRect(width, card, gatewayModeActive_), "TRUST", true);
 }
 
 void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
@@ -1429,10 +1550,26 @@ void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
     const uint16_t height = tft_.height();
     const int16_t contentTop = subHeaderHeight(width, height);
     const Rect card = settingsCardRect(width, height, contentTop);
+
+    if (settingsTrustButtonRect(width, card, gatewayModeActive_).contains(x, y, kTouchPad)) {
+        view_ = View::Trust;
+        drawTrust();
+        return;
+    }
+
     if (!card.contains(x, y, 0)) return;
-    const int16_t rowH = static_cast<int16_t>(card.h / 2);
+    const int16_t rowH = static_cast<int16_t>(card.h / 3);
     const int row = (static_cast<int>(y) - card.y) / rowH;
-    if (row < 0 || row > 1) return;
+    if (row < 0 || row > 2) return;
+
+    if (row == 2) {
+        securePairingToggleValue_ = !securePairingEnabled_;
+        securePairingToggleRequested_ = true;
+        securePairingEnabled_ = securePairingToggleValue_;  // optimistic UI update; main.cpp
+                                                              // corrects it if persistence fails
+        drawSettings();
+        return;
+    }
 
     const int direction = x < width / 2 ? -1 : 1;
     const OrientationTarget target = row == 0 ? OrientationTarget::Barcode : OrientationTarget::Editor;
@@ -1540,6 +1677,159 @@ void BarcodeApplication::handleGatewayTouch(uint16_t x, uint16_t y) {
     const int16_t contentTop = subHeaderHeight(width, height);
     if (gatewayPingButtonRect(contentTop, width).contains(x, y, kTouchPad)) {
         gatewayPingRequested_ = true;
+    }
+}
+
+void BarcodeApplication::drawTrust() {
+    applyOrientationForView(View::Trust);
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const Theme& th = theme();
+
+    tft_.fillScreen(th.bg);
+    const int16_t contentTop = drawSubHeader("Trust");
+
+    if (trustDiscovering_ || !trustPeerFingerprint_.empty()) {
+        const Rect card = settingsCardRect(width, height, contentTop);
+        tft_.fillRoundRect(card.x, card.y, card.w, card.h, 12, th.surface);
+        tft_.drawRoundRect(card.x, card.y, card.w, card.h, 12, th.hairline);
+        tft_.setTextDatum(TC_DATUM);
+        tft_.setTextColor(th.text, th.surface);
+        const std::string title = trustDiscovering_ ? "Waiting for peer..." : ("Pair with " + trustPeerFingerprint_ + "?");
+        tft_.drawString(title.c_str(), static_cast<int16_t>(card.x + card.w / 2), static_cast<int16_t>(card.y + 16), 2);
+        if (!trustDiscovering_) {
+            char code[8];
+            std::snprintf(code, sizeof(code), "%06u", static_cast<unsigned>(trustNumericCode_));
+            tft_.setTextDatum(MC_DATUM);
+            tft_.drawString(code, static_cast<int16_t>(card.x + card.w / 2), static_cast<int16_t>(card.y + card.h / 2), 4);
+
+            const Rect confirmBtn{static_cast<int16_t>(card.x + 12), static_cast<int16_t>(card.y + card.h - 44),
+                                 static_cast<int16_t>(card.w / 2 - 18), 32};
+            const Rect denyBtn{static_cast<int16_t>(card.x + card.w / 2 + 6), static_cast<int16_t>(card.y + card.h - 44),
+                              static_cast<int16_t>(card.w / 2 - 18), 32};
+            tft_.fillRoundRect(confirmBtn.x, confirmBtn.y, confirmBtn.w, confirmBtn.h, 8, th.accent);
+            tft_.setTextDatum(MC_DATUM);
+            tft_.setTextColor(th.accentText, th.accent);
+            tft_.drawString("CONFIRM", static_cast<int16_t>(confirmBtn.x + confirmBtn.w / 2),
+                            static_cast<int16_t>(confirmBtn.y + confirmBtn.h / 2), 1);
+            tft_.fillRoundRect(denyBtn.x, denyBtn.y, denyBtn.w, denyBtn.h, 8, th.danger);
+            tft_.setTextColor(TFT_WHITE, th.danger);
+            tft_.drawString("DENY", static_cast<int16_t>(denyBtn.x + denyBtn.w / 2),
+                            static_cast<int16_t>(denyBtn.y + denyBtn.h / 2), 1);
+        }
+        return;
+    }
+
+    // "PAIR" (rather than a longer label) so it fits gatewayPingButtonRect's compact
+    // top-right-corner shape, matching how the Gateway screen's identically-sized PING button
+    // keeps its label short.
+    const Rect pairButton = gatewayPingButtonRect(contentTop, width);
+    tft_.fillRoundRect(pairButton.x, pairButton.y, pairButton.w, pairButton.h,
+                       static_cast<int16_t>(pairButton.h / 2), th.accent);
+    tft_.setTextDatum(MC_DATUM);
+    tft_.setTextColor(th.accentText, th.accent);
+    tft_.drawString("PAIR", static_cast<int16_t>(pairButton.x + pairButton.w / 2),
+                    static_cast<int16_t>(pairButton.y + pairButton.h / 2), 1);
+
+    const int16_t listTop = static_cast<int16_t>(pairButton.y + pairButton.h + 8);
+    const Rect listCard = gatewayPeersCardRect(width, height, listTop);
+    tft_.fillRoundRect(listCard.x, listCard.y, listCard.w, listCard.h, 10, th.surface);
+    tft_.drawRoundRect(listCard.x, listCard.y, listCard.w, listCard.h, 10, th.hairline);
+    // One row per trusted peer with its fingerprint on the left and a "Forget" tap target on
+    // the right, mirroring drawGateway()'s peer list. gatewayModeActive_ selects which of the
+    // two BarcodeApplication-owned snapshots to read (see updateGatewayRelayTrustedPeers/
+    // updateEspNowTrustedPeers).
+    const std::vector<TrustPeerRow>& peers = gatewayModeActive_ ? gatewayRelayTrustedPeers_ : espNowTrustedPeers_;
+    const int16_t peerRowH = 16;
+    std::size_t shown = 0;
+    int16_t y = static_cast<int16_t>(listCard.y + 4);
+    for (; shown < peers.size(); ++shown) {
+        if (y + peerRowH > listCard.y + listCard.h - 4) break;
+        const TrustPeerRow& peer = peers[shown];
+        tft_.setTextDatum(TL_DATUM);
+        tft_.setTextColor(th.text, th.surface);
+        tft_.drawString(peer.fingerprint.c_str(), static_cast<int16_t>(listCard.x + 8), static_cast<int16_t>(y + 2), 1);
+        const Rect forgetBtn{static_cast<int16_t>(listCard.x + listCard.w - 56), y, 48, peerRowH};
+        tft_.fillRoundRect(forgetBtn.x, forgetBtn.y, forgetBtn.w, forgetBtn.h, 4, th.danger);
+        tft_.setTextDatum(MC_DATUM);
+        tft_.setTextColor(TFT_WHITE, th.danger);
+        tft_.drawString("X", static_cast<int16_t>(forgetBtn.x + forgetBtn.w / 2),
+                        static_cast<int16_t>(forgetBtn.y + forgetBtn.h / 2), 1);
+        y = static_cast<int16_t>(y + peerRowH);
+    }
+    if (peers.empty()) {
+        tft_.setTextDatum(TL_DATUM);
+        tft_.setTextColor(th.textFaint, th.surface);
+        tft_.drawString("No paired devices yet", static_cast<int16_t>(listCard.x + 8),
+                        static_cast<int16_t>(listCard.y + 8), 1);
+    }
+}
+
+void BarcodeApplication::handleTrustTouch(uint16_t x, uint16_t y) {
+    if (handleSubHeaderTouch(x, y, View::Home)) return;
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const int16_t contentTop = subHeaderHeight(width, height);
+
+    if (trustDiscovering_ || !trustPeerFingerprint_.empty()) {
+        if (trustDiscovering_) return;  // no buttons yet, just waiting on the peer's reply
+        const Rect card = settingsCardRect(width, height, contentTop);
+        const Rect confirmBtn{static_cast<int16_t>(card.x + 12), static_cast<int16_t>(card.y + card.h - 44),
+                             static_cast<int16_t>(card.w / 2 - 18), 32};
+        const Rect denyBtn{static_cast<int16_t>(card.x + card.w / 2 + 6), static_cast<int16_t>(card.y + card.h - 44),
+                          static_cast<int16_t>(card.w / 2 - 18), 32};
+        if (confirmBtn.contains(x, y, kTouchPad)) {
+            trustConfirmRequested_ = true;
+        } else if (denyBtn.contains(x, y, kTouchPad)) {
+            trustDenyRequested_ = true;
+        }
+        return;
+    }
+
+    const Rect pairButton = gatewayPingButtonRect(contentTop, width);
+    if (pairButton.contains(x, y, kTouchPad)) {
+        // Target MAC resolution: in direct (non-gateway) mode, EspNowEndpoint is inherently 1:1
+        // with a single gateway, so this offers the currently-discovered gateway (gatewayLinkStatus_,
+        // fed by EspNowEndpoint's own discovery ping/pong). In gateway mode, GatewayRelay can fan
+        // out to several clients, so this picks the first discovered peer (gatewayStats_.linkStats.peers)
+        // not already in the trusted list.
+        if (!gatewayModeActive_) {
+            if (gatewayLinkStatus_.connected) {
+                std::array<uint8_t, 6> mac{};
+                if (macFromString(gatewayLinkStatus_.gatewayId, mac)) {
+                    trustPairTargetMac_ = mac;
+                    trustPairRequested_ = true;
+                }
+            }
+        } else {
+            for (std::size_t i = 0; i < gatewayStats_.linkStats.peerCount; ++i) {
+                const auto& candidate = gatewayStats_.linkStats.peers[i];
+                const bool alreadyTrusted =
+                    std::any_of(gatewayRelayTrustedPeers_.begin(), gatewayRelayTrustedPeers_.end(),
+                               [&](const TrustPeerRow& row) { return row.mac == candidate.mac; });
+                if (!alreadyTrusted) {
+                    trustPairTargetMac_ = candidate.mac;
+                    trustPairRequested_ = true;
+                    break;
+                }
+            }
+        }
+        return;
+    }
+
+    const int16_t listTop = static_cast<int16_t>(pairButton.y + pairButton.h + 8);
+    const Rect listCard = gatewayPeersCardRect(width, height, listTop);
+    if (!listCard.contains(x, y, 0)) return;
+
+    const std::vector<TrustPeerRow>& peers = gatewayModeActive_ ? gatewayRelayTrustedPeers_ : espNowTrustedPeers_;
+    const int16_t peerRowH = 16;
+    const int row = (static_cast<int>(y) - listCard.y - 4) / peerRowH;
+    if (row < 0 || static_cast<std::size_t>(row) >= peers.size()) return;
+    const int16_t rowY = static_cast<int16_t>(listCard.y + 4 + row * peerRowH);
+    const Rect forgetBtn{static_cast<int16_t>(listCard.x + listCard.w - 56), rowY, 48, peerRowH};
+    if (forgetBtn.contains(x, y, kTouchPad)) {
+        trustForgetFingerprint_ = peers[static_cast<std::size_t>(row)].fingerprint;
+        trustForgetRequested_ = true;
     }
 }
 
