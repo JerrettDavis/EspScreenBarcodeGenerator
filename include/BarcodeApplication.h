@@ -46,6 +46,11 @@ public:
     // since the last call -- main.cpp polls this each loop() iteration, same pattern as
     // SerialLegacyEndpoint::gatewayRequested().
     bool consumeGatewayPingRequest();
+    // True (once) if the Settings screen's "Enter Gateway Mode" button was tapped since the last
+    // call -- main.cpp polls this alongside SerialLegacyEndpoint::gatewayRequested() to drive the
+    // same one-way Legacy->GatewayRelayMode transition, so gateway mode can be entered from the
+    // touchscreen as well as from a connected host.
+    bool consumeGatewayModeToggleRequest();
 
     // Secure Pairing (docs/superpowers/specs/2026-08-22-espnow-secure-pairing-design.md) --
     // fed every loop() iteration from whichever of EspNowEndpoint's/GatewayRelay's identical
@@ -173,6 +178,7 @@ private:
     esplink::GatewayRelay::Stats gatewayStats_{};
     uint32_t gatewayStatsRedrawAt_ = 0;
     bool gatewayPingRequested_ = false;
+    bool gatewayModeToggleRequested_ = false;
 
     // This board's own gateway-discovery state (client role) -- see updateGatewayLinkStatus.
     esplink::GatewayLinkInfo gatewayLinkStatus_{};

@@ -413,8 +413,14 @@ std::array<Rect, 3> gatewayStatTiles(uint16_t width, int16_t y) {
     return {row[0], row[1], row[2]};
 }
 
-Rect gatewayRestartButtonRect(uint16_t width, uint16_t height) {
-    return Rect{8, static_cast<int16_t>(height - 42), static_cast<int16_t>(width - 16), 34};
+// Bottom row of the Gateway stats screen: a Trust button (this board's only on-screen route to
+// pairing/peer management while in gateway mode -- otherwise it's only pushed there unsolicited
+// by an inbound pairing request, see updateTrustPairingStatus) alongside the existing restart
+// control.
+std::array<Rect, 2> gatewayFooterButtons(uint16_t width, uint16_t height) {
+    const int16_t y = static_cast<int16_t>(height - 42);
+    const auto row = distributeRow(width, y, 34, 2);
+    return {row[0], row[1]};
 }
 
 Rect gatewayPeersCardRect(uint16_t width, uint16_t height, int16_t statsY) {
@@ -449,6 +455,13 @@ int16_t settingsContentBottomY(uint16_t width, const Rect& card, bool gatewayMod
 Rect settingsTrustButtonRect(uint16_t width, const Rect& card, bool gatewayModeActive) {
     const int16_t y = static_cast<int16_t>(settingsContentBottomY(width, card, gatewayModeActive) + 10);
     return Rect{8, y, static_cast<int16_t>(width - 16), 36};
+}
+
+// Bottom-anchored (rather than stacked below the Trust button) so it never collides with the
+// orientation/pairing card or link-status row above it, even on the shortest supported
+// (landscape) height -- same anchoring gatewayFooterButtons uses on the Gateway screen.
+Rect settingsGatewayModeButtonRect(uint16_t width, uint16_t height) {
+    return Rect{8, static_cast<int16_t>(height - 42), static_cast<int16_t>(width - 16), 34};
 }
 
 // ---- Trust screen ----
@@ -771,6 +784,12 @@ void BarcodeApplication::updateGatewayLinkStatus(const esplink::GatewayLinkInfo&
 bool BarcodeApplication::consumeGatewayPingRequest() {
     if (!gatewayPingRequested_) return false;
     gatewayPingRequested_ = false;
+    return true;
+}
+
+bool BarcodeApplication::consumeGatewayModeToggleRequest() {
+    if (!gatewayModeToggleRequested_) return false;
+    gatewayModeToggleRequested_ = false;
     return true;
 }
 
@@ -1563,6 +1582,14 @@ void BarcodeApplication::drawSettings() {
     // "Trust" navigation button below whatever else this screen rendered -- same accent-button
     // shape as drawGatewayHomeBanner's button-to-View::Gateway pattern.
     drawButton(settingsTrustButtonRect(width, card, gatewayModeActive_), "TRUST", true);
+
+    // On-screen entry point into Gateway mode -- previously only reachable via the "gateway" USB
+    // command a connected host sends over the legacy serial line (see SerialLegacyEndpoint).
+    // Danger-styled and only shown before the switch, since GatewayRelayMode is one-way and a
+    // reboot is the only way back out (see rebootDevice()).
+    if (!gatewayModeActive_) {
+        drawButton(settingsGatewayModeButtonRect(width, height), "ENTER GATEWAY MODE", false, theme().danger);
+    }
 }
 
 void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
@@ -1575,6 +1602,13 @@ void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
     if (settingsTrustButtonRect(width, card, gatewayModeActive_).contains(x, y, kTouchPad)) {
         view_ = View::Trust;
         drawTrust();
+        return;
+    }
+
+    if (!gatewayModeActive_ && settingsGatewayModeButtonRect(width, height).contains(x, y, kTouchPad)) {
+        // main.cpp drives the actual Legacy->GatewayRelayMode transition (same one-way switch as
+        // the USB "gateway" command) once it observes this request; no local state flips here.
+        gatewayModeToggleRequested_ = true;
         return;
     }
 
@@ -1678,20 +1712,29 @@ void BarcodeApplication::drawGateway() {
         tft_.drawString(more, static_cast<int16_t>(peersCard.x + 8), static_cast<int16_t>(y + 2), 1);
     }
 
-    const Rect restart = gatewayRestartButtonRect(width, height);
+    const auto footer = gatewayFooterButtons(width, height);
+    const Rect& trustBtn = footer[0];
+    const Rect& restart = footer[1];
+    drawButton(trustBtn, "TRUST", true);
     tft_.fillRoundRect(restart.x, restart.y, restart.w, restart.h, 10, th.danger);
     tft_.drawRoundRect(restart.x, restart.y, restart.w, restart.h, 10, th.danger);
-    iconRestart(tft_, static_cast<int16_t>(restart.x + restart.w / 2 - 46), static_cast<int16_t>(restart.y + restart.h / 2), TFT_WHITE, th.danger);
+    iconRestart(tft_, static_cast<int16_t>(restart.x + 20), static_cast<int16_t>(restart.y + restart.h / 2), TFT_WHITE, th.danger);
     tft_.setTextDatum(MC_DATUM);
     tft_.setTextColor(TFT_WHITE, th.danger);
-    tft_.drawString("RESTART DEVICE", static_cast<int16_t>(restart.x + restart.w / 2 + 8), static_cast<int16_t>(restart.y + restart.h / 2), 2);
+    tft_.drawString("RESTART", static_cast<int16_t>(restart.x + restart.w / 2 + 10), static_cast<int16_t>(restart.y + restart.h / 2), 2);
 }
 
 void BarcodeApplication::handleGatewayTouch(uint16_t x, uint16_t y) {
     if (handleSubHeaderTouch(x, y, View::Home)) return;
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
-    if (gatewayRestartButtonRect(width, height).contains(x, y, kTouchPad)) {
+    const auto footer = gatewayFooterButtons(width, height);
+    if (footer[0].contains(x, y, kTouchPad)) {
+        view_ = View::Trust;
+        drawTrust();
+        return;
+    }
+    if (footer[1].contains(x, y, kTouchPad)) {
         rebootDevice();
         return;
     }

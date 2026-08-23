@@ -100,7 +100,11 @@ void setup() {
 void loop() {
     if (active == ActiveTransport::Legacy) {
         legacyEndpoint.loop();
-        if (legacyEndpoint.gatewayRequested()) {
+        // Gateway mode can be requested either by a connected host (legacy "gateway" USB command)
+        // or by the on-device Settings screen's "Enter Gateway Mode" button -- both consumed here
+        // so exactly one drives the transition even if both fire on the same tick.
+        const bool screenGatewayRequested = application.consumeGatewayModeToggleRequest();
+        if (legacyEndpoint.gatewayRequested() || screenGatewayRequested) {
             active = ActiveTransport::GatewayRelayMode;
             gatewayRelay.begin(espNowEndpoint.macAddress());  // takes over the ESP-NOW recv callback
             application.enterGatewayMode();

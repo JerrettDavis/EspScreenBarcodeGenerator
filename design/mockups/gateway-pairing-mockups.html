@@ -1,0 +1,201 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Gateway Mode + Pairing mockups</title>
+<style>
+  :root {
+    --bg: #0B0C0E;
+    --surface: #131519;
+    --surfaceAlt: #1B1E23;
+    --hairline: #262A30;
+    --text: #F5F6F7;
+    --textMuted: #9098A0;
+    --textFaint: #6B7178;
+    --accent: #2DD9C6;
+    --accentText: #04201C;
+    --danger: #FF5449;
+  }
+  html, body {
+    margin: 0;
+    background: #202225;
+    font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  }
+  body { padding: 24px; display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .frame-wrap { display: flex; flex-direction: column; gap: 8px; }
+  .frame-label { color: #cfd3d8; font-size: 13px; font-weight: 600; }
+  .frame {
+    position: relative;
+    width: 480px;
+    height: 320px;
+    background: var(--bg);
+    border-radius: 4px;
+    box-shadow: 0 0 0 6px #000, 0 8px 24px rgba(0,0,0,.5);
+    overflow: hidden;
+  }
+  .frame * { box-sizing: border-box; }
+  .positioned, .subheader, .card, .row, .hline, .switch, .btn, .badge-new, .pill, .tile, .peer-row, .code {
+    position: absolute;
+  }
+  .subheader {
+    left: 0; top: 0; width: 480px; height: 28px; background: var(--bg);
+    display: flex; align-items: center;
+  }
+  .subheader .back {
+    position: static; width: 24px; height: 24px; margin-left: 4px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .subheader .back::before {
+    content: ""; display: block; width: 7px; height: 7px;
+    border-left: 2px solid var(--textMuted); border-bottom: 2px solid var(--textMuted);
+    transform: rotate(45deg);
+  }
+  .subheader .title { position: static; margin-left: 6px; color: var(--text); font-size: 15px; font-weight: 600; }
+  .subheader .toggle { position: static; margin-left: auto; margin-right: 6px; width: 42px; height: 20px; border-radius: 10px; background: var(--surfaceAlt); border: 1px solid var(--hairline); }
+  .subheader .toggle .knob { position: absolute; left: 4px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--textMuted); }
+
+  .card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; }
+  .row { left: 12px; width: 440px; display: flex; align-items: center; justify-content: space-between; color: var(--text); font-size: 13px; }
+  .row .label { color: var(--text); }
+  .row .value { color: var(--textMuted); font-size: 12px; }
+  .hline { left: 10px; width: 444px; height: 1px; background: var(--hairline); }
+
+  .switch { width: 30px; height: 18px; border-radius: 9px; }
+  .switch.on { background: rgba(45,217,198,.18); border: 1px solid var(--accent); }
+  .switch.off { background: var(--surface); border: 1px solid var(--hairline); }
+  .switch .knob { position: absolute; top: 2px; width: 14px; height: 14px; border-radius: 50%; }
+  .switch.on .knob { left: 14px; background: #fff; }
+  .switch.off .knob { left: 2px; background: var(--textMuted); }
+
+  .btn { border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; letter-spacing: .3px; }
+  .btn.accent { background: var(--accent); color: var(--accentText); }
+  .btn.danger { background: var(--danger); color: #fff; }
+  .btn.new { outline: 2px dashed #ffd23f; outline-offset: 2px; }
+
+  .badge-new {
+    right: -8px; top: -10px; background: #ffd23f; color: #201a00;
+    font-size: 9px; font-weight: 800; padding: 2px 5px; border-radius: 4px; letter-spacing: .4px;
+  }
+
+  .pill { background: var(--surface); border: 1px solid var(--hairline); border-radius: 11px; display:flex; align-items:center; padding-left: 10px; color: var(--text); font-size: 11px; }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; flex: none; }
+  .dot.ok { background: var(--accent); }
+  .dot.bad { background: var(--danger); }
+
+  .tile { background: var(--surface); border: 1px solid var(--hairline); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; }
+  .tile .num { color: var(--text); font-size: 15px; font-weight: 700; }
+  .tile .cap { color: var(--textMuted); font-size: 9px; letter-spacing: .5px; margin-top: 4px; }
+
+  .peer-row { left: 8px; width: 448px; display:flex; align-items:center; justify-content: space-between; color: var(--text); font-size: 11px; }
+  .peer-row .fp { color: var(--text); }
+  .peer-row .meta { color: var(--textMuted); }
+  .peer-row .forget { color: var(--danger); font-size: 10px; font-weight: 700; }
+
+  .code { color: var(--text); font-size: 30px; font-weight: 700; letter-spacing: 4px; font-variant-numeric: tabular-nums; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- 1: Settings screen, client mode, showing the new "Enter Gateway Mode" button -->
+<div class="frame-wrap">
+  <div class="frame-label">1 &middot; Settings &mdash; new &quot;Enter Gateway Mode&quot; button</div>
+  <div class="frame" id="frame-settings">
+    <div class="subheader">
+      <div class="back"></div>
+      <div class="title">Settings</div>
+      <div class="toggle off"><div class="knob"></div></div>
+    </div>
+
+    <div class="card" style="left:8px; top:34px; width:464px; height:120px;">
+      <div class="hline" style="left:10px; top:40px;"></div>
+      <div class="hline" style="left:10px; top:80px;"></div>
+      <div class="row" style="top:8px;"><span class="label">Barcode Orientation</span><span class="value">&lt;  90 deg  &gt;</span></div>
+      <div class="row" style="top:48px;"><span class="label">Editor Orientation</span><span class="value">&lt;  90 deg  &gt;</span></div>
+      <div class="row" style="top:88px;"><span class="label">Secure Pairing</span></div>
+      <div class="switch on" style="left:422px; top:97px;"><div class="knob"></div></div>
+    </div>
+
+    <div style="position:absolute; left:8px; top:166px; width:464px; height:28px; background:var(--surface); border:1px solid var(--hairline); border-radius:10px; display:flex; align-items:center; padding-left:12px; color:var(--text); font-size:11px;">
+      <span style="width:8px; height:8px; border-radius:50%; background:var(--textFaint); margin-right:12px; flex:none;"></span>
+      ESP-NOW Gateway: searching...
+    </div>
+
+    <div class="btn accent" style="left:8px; top:204px; width:464px; height:36px;">TRUST</div>
+
+    <div style="position:absolute; left:8px; top:278px; width:464px; height:34px;">
+      <div class="btn danger new" style="left:0; top:0; width:464px; height:34px;">ENTER GATEWAY MODE</div>
+      <div class="badge-new">NEW</div>
+    </div>
+  </div>
+</div>
+
+<!-- 2: Gateway stats screen, showing the new split TRUST / RESTART footer -->
+<div class="frame-wrap">
+  <div class="frame-label">2 &middot; Gateway stats &mdash; new &quot;TRUST&quot; button alongside Restart</div>
+  <div class="frame" id="frame-gateway">
+    <div class="subheader">
+      <div class="back"></div>
+      <div class="title">Gateway</div>
+      <div class="toggle off"><div class="knob"></div></div>
+    </div>
+
+    <div class="pill" style="left:8px; top:34px; width:170px; height:22px;"><span class="dot ok"></span>USB HOST CONNECTED</div>
+    <div class="btn accent" style="left:404px; top:34px; width:68px; height:22px; font-size:11px;">PING</div>
+
+    <div class="tile" style="left:8px; top:62px; width:150px; height:40px;"><div class="num">2</div><div class="cap">PEERS</div></div>
+    <div class="tile" style="left:164px; top:62px; width:150px; height:40px;"><div class="num">418</div><div class="cap">SENT</div></div>
+    <div class="tile" style="left:320px; top:62px; width:150px; height:40px;"><div class="num">402</div><div class="cap">RECEIVED</div></div>
+
+    <div class="card" style="left:8px; top:108px; width:464px; height:160px;">
+      <div class="peer-row" style="top:8px;"><span class="fp">client-esp32-A1</span><span class="meta">3s ago ~18ms</span></div>
+      <div class="peer-row" style="top:26px;"><span class="fp">client-esp32-B7</span><span class="meta">1s ago ~21ms</span></div>
+    </div>
+
+    <div style="position:absolute; left:8px; top:278px; width:228px; height:34px;">
+      <div class="btn accent new" style="left:0; top:0; width:228px; height:34px;">TRUST</div>
+      <div class="badge-new">NEW</div>
+    </div>
+    <div class="btn danger" style="left:244px; top:278px; width:228px; height:34px;">&#8635;&nbsp;&nbsp;RESTART</div>
+  </div>
+</div>
+
+<!-- 3: Trust screen, idle list mode (reachable from both Settings and now Gateway) -->
+<div class="frame-wrap">
+  <div class="frame-label">3 &middot; Trust &mdash; peer list (PAIR + Forget)</div>
+  <div class="frame" id="frame-trust-list">
+    <div class="subheader">
+      <div class="back"></div>
+      <div class="title">Trust</div>
+      <div class="toggle off"><div class="knob"></div></div>
+    </div>
+
+    <div class="btn accent" style="left:404px; top:34px; width:68px; height:22px; font-size:11px;">PAIR</div>
+
+    <div class="card" style="left:8px; top:64px; width:464px; height:204px;">
+      <div class="peer-row" style="top:8px;"><span class="fp">A1:B2:C3:D4:E5:F6</span><span class="forget">FORGET</span></div>
+      <div class="peer-row" style="top:26px;"><span class="fp">11:22:33:44:55:66</span><span class="forget">FORGET</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- 4: Trust screen, pairing confirmation overlay -->
+<div class="frame-wrap">
+  <div class="frame-label">4 &middot; Trust &mdash; numeric-code confirmation</div>
+  <div class="frame" id="frame-trust-confirm">
+    <div class="subheader">
+      <div class="back"></div>
+      <div class="title">Trust</div>
+      <div class="toggle off"><div class="knob"></div></div>
+    </div>
+
+    <div class="card" style="left:8px; top:34px; width:464px; height:120px;">
+      <div style="position:absolute; left:0; top:16px; width:464px; text-align:center; color:var(--text); font-size:13px;">Pair with client-esp32-A1?</div>
+      <div class="code" style="left:0; top:44px; width:464px; text-align:center;">483 921</div>
+      <div class="btn accent" style="left:20px; top:76px; width:214px; height:32px;">CONFIRM</div>
+      <div class="btn danger" style="left:246px; top:76px; width:214px; height:32px;">DENY</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

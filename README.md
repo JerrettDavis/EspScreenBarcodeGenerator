@@ -231,6 +231,10 @@ The PlatformIO suite additionally resolves the real QR dependency, runs the QR a
 
 See [docs/VALIDATION.md](docs/VALIDATION.md) and [docs/HARDWARE_ACCEPTANCE.md](docs/HARDWARE_ACCEPTANCE.md). Software tests do not replace a physical scan qualification against the exact Zebra scanner and display unit.
 
+## Gateway mode and pairing
+
+One board can relay EspLink v2 traffic between a USB-connected host and a second, ESP-NOW-connected display, and boards enforce mutual trust (ECDSA/ECDH pairing with a numeric confirmation code) before relaying to each other. Both can be driven entirely on-screen — from the device's own touchscreen or from the Blazor controller in a browser. See [docs/GATEWAY_MODE_AND_PAIRING.md](docs/GATEWAY_MODE_AND_PAIRING.md) for the step-by-step guide with screenshots.
+
 ## Project layout
 
 ```text
