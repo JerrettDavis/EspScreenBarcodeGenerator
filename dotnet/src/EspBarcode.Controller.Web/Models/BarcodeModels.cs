@@ -97,6 +97,16 @@ public sealed record GatewayLinkStatus(bool Connected, long AgeMs, long RttMs, s
 public sealed record GatewayPeer(
     string Mac, long LastSeenMsAgo, bool ViaRelay, bool ViaPing, long? RttMs, string? DeviceId);
 
+/// <summary>One paired ESP-NOW peer this gateway trusts — see <c>GatewayLinkClient.ListTrustedPeersAsync</c>.</summary>
+public sealed record TrustedPeer(string Fingerprint, string Mac, int RouteId, long PairedAtMs, string Label);
+
+/// <summary>The gateway's current pairing-attempt state — see <c>GatewayLinkClient.PairingStatusAsync</c>.</summary>
+public sealed record TrustPairingStatus(string State, string? Fingerprint, int? NumericCode)
+{
+    public bool AwaitingApproval => State == "awaiting_approval";
+    public bool InProgress => State is "discovering" or "awaiting_approval";
+}
+
 public sealed record DownloadedMatrix(int Width, int Height, bool Linear, bool Invert, string Label, byte[] Packed);
 
 /// <summary>A barcode spec saved in the browser's local library (see <c>BarcodeLibraryService</c>).</summary>

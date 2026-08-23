@@ -125,5 +125,56 @@ public sealed class GatewayLinkClient : IAsyncDisposable
         => SendAsync(ServiceId.Gateway, "gateway.ping.now", null, controlSessionId: 0,
             timeout ?? TimeSpan.FromSeconds(5), cancellationToken);
 
+    /// <summary>The gateway's own trust list — <c>trust.controllers.list</c>, answered locally (Task 7 Step 8).</summary>
+    public async Task<IReadOnlyList<TrustedPeer>> ListTrustedPeersAsync(
+        TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        var body = await SendAsync(
+            ServiceId.Trust, "trust.controllers.list", null, controlSessionId: 0,
+            timeout ?? TimeSpan.FromSeconds(5), cancellationToken);
+        var peers = body["peers"]?.AsArray() ?? [];
+        return peers.Select(p =>
+        {
+            var o = p!.AsObject();
+            return new TrustedPeer(
+                o["fingerprint"]!.GetValue<string>(), o["mac"]!.GetValue<string>(),
+                o["route_id"]!.GetValue<int>(), o["paired_at_ms"]!.GetValue<long>(),
+                o["label"]?.GetValue<string>() ?? "");
+        }).ToArray();
+    }
+
+    /// <summary>Arms this gateway's pairing window against a specific discovered MAC — <c>trust.pair.begin</c>.</summary>
+    public Task BeginPairingAsync(string mac, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        => SendAsync(ServiceId.Trust, "trust.pair.begin", new JsonObject { ["mac"] = mac }, controlSessionId: 0,
+            timeout ?? TimeSpan.FromSeconds(5), cancellationToken);
+
+    /// <summary>Cancels an in-progress pairing attempt — <c>trust.pair.cancel</c>.</summary>
+    public Task CancelPairingAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        => SendAsync(ServiceId.Trust, "trust.pair.cancel", null, controlSessionId: 0,
+            timeout ?? TimeSpan.FromSeconds(5), cancellationToken);
+
+    /// <summary>Polls the current pairing-attempt state — <c>trust.pair.status</c>.</summary>
+    public async Task<TrustPairingStatus> PairingStatusAsync(
+        TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        var body = await SendAsync(
+            ServiceId.Trust, "trust.pair.status", null, controlSessionId: 0,
+            timeout ?? TimeSpan.FromSeconds(5), cancellationToken);
+        return new TrustPairingStatus(
+            body["state"]!.GetValue<string>(),
+            body["fingerprint"]?.GetValue<string>(),
+            body["numeric_code"]?.GetValue<int>());
+    }
+
+    /// <summary>Forgets a trusted peer by fingerprint — <c>trust.controller.forget</c>.</summary>
+    public async Task<bool> ForgetPeerAsync(
+        string fingerprint, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        var body = await SendAsync(
+            ServiceId.Trust, "trust.controller.forget", new JsonObject { ["fingerprint"] = fingerprint },
+            controlSessionId: 0, timeout ?? TimeSpan.FromSeconds(5), cancellationToken);
+        return body["ok"]?.GetValue<bool>() ?? false;
+    }
+
     public ValueTask DisposeAsync() => _controlSession.DisposeAsync();
 }
