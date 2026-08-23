@@ -1825,6 +1825,17 @@ void BarcodeApplication::handleTrustTouch(uint16_t x, uint16_t y) {
     const int16_t peerRowH = 16;
     const int row = (static_cast<int>(y) - listCard.y - 4) / peerRowH;
     if (row < 0 || static_cast<std::size_t>(row) >= peers.size()) return;
+    // Mirror drawTrust()'s render loop, which stops drawing once a row would overflow the
+    // card's visible height (`if (y + peerRowH > listCard.y + listCard.h - 4) break;`). A tap
+    // past the last *rendered* row must not resolve to a real-but-invisible peer -- there'd be
+    // no visual affordance telling the user which device (if any) they just told the firmware
+    // to forget.
+    std::size_t visibleRows = 0;
+    for (int16_t probeY = static_cast<int16_t>(listCard.y + 4); probeY + peerRowH <= listCard.y + listCard.h - 4;
+         probeY = static_cast<int16_t>(probeY + peerRowH)) {
+        ++visibleRows;
+    }
+    if (static_cast<std::size_t>(row) >= visibleRows) return;
     const int16_t rowY = static_cast<int16_t>(listCard.y + 4 + row * peerRowH);
     const Rect forgetBtn{static_cast<int16_t>(listCard.x + listCard.w - 56), rowY, 48, peerRowH};
     if (forgetBtn.contains(x, y, kTouchPad)) {
