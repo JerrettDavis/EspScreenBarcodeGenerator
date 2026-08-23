@@ -197,10 +197,13 @@ void GatewayRelay::processEspNowDatagram(const RxDatagram& datagram) {
     }
 
     // Secure Pairing enforcement: once enabled, only a sender whose MAC already has a trust
-    // record is allowed through to relay. Trust/Gateway traffic is exempt (handled above already,
-    // before this point is ever reached).
-    if (trustConfig_.securePairingEnabled() && trustConfig_.store().findByMac(datagram.mac) == nullptr) {
-        return;  // not a trusted peer: drop rather than relay
+    // record is allowed through to relay, AND its linkMessageId must be strictly greater than
+    // the last one seen from that peer (spec §2 "Anti-replay") -- a captured and replayed
+    // encrypted frame is otherwise indistinguishable from a fresh one. Trust/Gateway traffic is
+    // exempt (handled above already, before this point is ever reached).
+    if (trustConfig_.securePairingEnabled() &&
+        !trustConfig_.mutableStore().checkAndAdvanceReplayGuard(datagram.mac, header.linkMessageId)) {
+        return;  // untrusted sender, or a replayed/duplicate/reordered frame: drop rather than relay
     }
 
     linkStats_.recordPeerSeen(datagram.mac.data(), millis());
@@ -217,25 +220,31 @@ void GatewayRelay::relayToEspNow(const HopFrameHeader& sourceHeader, const std::
         return;
     }
 
-    // Per-client routing: once Secure Pairing is on and the host has stamped a non-zero routeId
-    // (Task 10/11 surface each paired client's routeId to the .NET host so it can do this), send
-    // unicast to that specific trusted client instead of broadcasting to everyone in range. Until
-    // a host sends a non-zero routeId (or Secure Pairing is off), behavior is unchanged from
-    // today's broadcast-everything -- but a routeId that WAS stamped and doesn't resolve (e.g. the
-    // host still has a since-forgotten client's routeId cached) must never fall back to broadcast:
-    // that would leak a revoked client's traffic to every device in range in the clear, defeating
-    // the whole point of enforcing Secure Pairing. Drop it instead.
+    // Per-client routing: once Secure Pairing is on, relayed traffic must never go out over the
+    // plaintext broadcast peer -- that would leak it to every device in range in the clear,
+    // defeating the whole point of enforcing Secure Pairing. Prefer the host-stamped routeId
+    // (Task 10/11 surface each paired client's routeId to the .NET host so it can target one of
+    // several paired clients); if the host hasn't stamped one (today's .NET client doesn't yet)
+    // but there is exactly one trusted client, that single client is the unambiguous target --
+    // this is what keeps the already hw-validated single-client scenario genuinely encrypted
+    // end-to-end without waiting on that host-side plumbing. Anything else (routeId doesn't
+    // resolve to a trust record, or it's unset with zero/multiple trusted clients to guess
+    // between) is dropped rather than guessed or broadcast.
     const uint8_t* destination = kBroadcastAddress;
-    if (trustConfig_.securePairingEnabled() && outHeader.routeId != 0) {
+    if (trustConfig_.securePairingEnabled()) {
         destination = nullptr;
-        for (std::size_t i = 0; i < trustConfig_.store().size(); ++i) {
-            const TrustRecord* record = trustConfig_.store().at(i);
-            if (record->routeId == outHeader.routeId) {
-                destination = record->mac.data();
-                break;
+        if (outHeader.routeId != 0) {
+            for (std::size_t i = 0; i < trustConfig_.store().size(); ++i) {
+                const TrustRecord* record = trustConfig_.store().at(i);
+                if (record->routeId == outHeader.routeId) {
+                    destination = record->mac.data();
+                    break;
+                }
             }
+        } else if (trustConfig_.store().size() == 1) {
+            destination = trustConfig_.store().at(0)->mac.data();
         }
-        if (destination == nullptr) return;  // unresolvable routeId: drop, don't broadcast
+        if (destination == nullptr) return;  // unresolvable/ambiguous target: drop, don't broadcast
     }
     for (const auto& frame : frames) esp_now_send(destination, frame.data(), frame.size());
 }

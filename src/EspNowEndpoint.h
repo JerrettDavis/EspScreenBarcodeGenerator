@@ -125,10 +125,17 @@ private:
     };
 
     void processDatagram(const RxDatagram& datagram);
-    void processMessage(const std::array<uint8_t, 6>& fromMac, const MessageEnvelope& envelope,
-                        const std::vector<uint8_t>& body);
+    void processMessage(const std::array<uint8_t, 6>& fromMac, uint32_t linkMessageId,
+                        const MessageEnvelope& envelope, const std::vector<uint8_t>& body);
     void sendEnvelopeTo(const uint8_t* destination, MessageKind kind, ServiceId serviceId,
                        const std::vector<uint8_t>& bodyBytes, uint64_t correlationId);
+    // Once Secure Pairing is on, a command response must go back over the encrypted unicast
+    // link to whoever actually sent the request (already verified trusted -- see the
+    // enforcement check in processMessage) rather than the plaintext broadcast peer, or the
+    // "no eavesdropper can decrypt traffic" half of the spec would be violated even though the
+    // pairing handshake itself is properly encrypted. Off, this is unchanged: reply broadcast,
+    // matching the hw-validated open compatibility profile byte-for-byte.
+    const uint8_t* replyDestination() const;
 
     // The gateway-discovery ping/pong side channel — handled independently of the ordinary
     // command dispatch path above (it's Event-kind, not Command, and needs no ControlSession).
@@ -170,6 +177,7 @@ private:
     uint64_t nextResponseOperationId_ = 1;
     uint64_t currentRequestOperationId_ = 0;
     std::string currentRequestName_;
+    std::array<uint8_t, 6> currentRequestFromMac_{};
 
     // Gateway-discovery state (this board's "client" role) — see the class comment above.
     static constexpr uint32_t kGatewayProbeIntervalMs = 3000;    // while not connected

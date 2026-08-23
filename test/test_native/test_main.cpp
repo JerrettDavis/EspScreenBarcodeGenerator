@@ -329,6 +329,32 @@ void test_trust_store_preserves_loaded_route_ids() {
     }
 }
 
+// Anti-replay guard (spec §2): once paired, a captured-and-replayed encrypted frame from a
+// trusted peer must be rejected, not reprocessed as if it were fresh.
+void test_trust_store_replay_guard_rejects_non_increasing_ids() {
+    esplink::TrustStore store;
+    esplink::TrustRecord record;
+    record.staticPublicKey.fill(0x11);
+    record.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+    TEST_ASSERT_TRUE(store.add(record));
+
+    // An untrusted MAC is always rejected -- nothing to advance.
+    const std::array<uint8_t, 6> stranger = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    TEST_ASSERT_FALSE(store.checkAndAdvanceReplayGuard(stranger, 1));
+
+    // Strictly increasing ids from a trusted peer are accepted, advancing the watermark.
+    TEST_ASSERT_TRUE(store.checkAndAdvanceReplayGuard(record.mac, 1));
+    TEST_ASSERT_TRUE(store.checkAndAdvanceReplayGuard(record.mac, 2));
+    TEST_ASSERT_TRUE(store.checkAndAdvanceReplayGuard(record.mac, 5));  // gaps are fine, just monotonic
+
+    // A replay of an already-seen id, or anything not strictly greater, is rejected.
+    TEST_ASSERT_FALSE(store.checkAndAdvanceReplayGuard(record.mac, 5));
+    TEST_ASSERT_FALSE(store.checkAndAdvanceReplayGuard(record.mac, 3));
+
+    // The watermark truly held at 5 despite the rejected attempts -- the next real id still works.
+    TEST_ASSERT_TRUE(store.checkAndAdvanceReplayGuard(record.mac, 6));
+}
+
 void test_trust_fingerprint_format() {
     esplink::TrustHash hash{};
     hash[0] = 0xA3;
@@ -467,6 +493,7 @@ int main(int, char**) {
     RUN_TEST(test_trust_store_add_find_forget);
     RUN_TEST(test_trust_store_enforces_cap);
     RUN_TEST(test_trust_store_preserves_loaded_route_ids);
+    RUN_TEST(test_trust_store_replay_guard_rejects_non_increasing_ids);
     RUN_TEST(test_trust_fingerprint_format);
     RUN_TEST(test_trust_pairing_happy_path_both_confirm_first);
     RUN_TEST(test_trust_pairing_peer_confirms_before_us);

@@ -62,6 +62,17 @@ bool TrustStore::add(TrustRecord record) {
     return true;
 }
 
+bool TrustStore::checkAndAdvanceReplayGuard(const std::array<uint8_t, 6>& mac, uint32_t linkMessageId) {
+    for (std::size_t i = 0; i < count_; ++i) {
+        if (records_[i].mac == mac) {
+            if (linkMessageId <= records_[i].lastSeenLinkMessageId) return false;
+            records_[i].lastSeenLinkMessageId = linkMessageId;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool TrustStore::forget(const TrustPublicKey& key) {
     for (std::size_t i = 0; i < count_; ++i) {
         if (records_[i].staticPublicKey == key) {

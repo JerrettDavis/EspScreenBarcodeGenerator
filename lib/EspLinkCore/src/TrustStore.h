@@ -17,6 +17,13 @@ struct TrustRecord {
     uint16_t routeId = 0;
     uint32_t pairedAtMs = 0;
     std::string label;
+    // Anti-replay watermark (spec §2): the highest HopFrameHeader.linkMessageId seen from this
+    // peer since it was loaded/added this boot. Deliberately runtime-only -- never persisted to
+    // trust.json, never round-tripped through add()'s "preserve on reload" path below. Both sides'
+    // real linkMessageId counters reset to 1 on every reboot (see EspNowEndpoint/GatewayRelay's
+    // linkMessageCounter_), so persisting a prior session's high-water mark would reject the
+    // peer's very first (legitimately renumbered) frame after either device restarts.
+    uint32_t lastSeenLinkMessageId = 0;
 };
 
 // Formats the first 4 bytes of a SHA-256 hash (see ITrustCrypto::sha256 over a static public
@@ -50,6 +57,12 @@ public:
 
     // Removes the record matching this static key, if any. Returns true if something was removed.
     bool forget(const TrustPublicKey& key);
+
+    // Anti-replay check (spec §2 "Anti-replay"): true and advances the watermark if `linkMessageId`
+    // is strictly greater than the last one seen from `mac` (accepted, not a replay); false and
+    // unchanged otherwise -- either `mac` isn't a trust record at all, or `linkMessageId` is a
+    // duplicate/reordered/replayed frame that must be dropped rather than processed again.
+    bool checkAndAdvanceReplayGuard(const std::array<uint8_t, 6>& mac, uint32_t linkMessageId);
 
     void clear() { count_ = 0; }
 

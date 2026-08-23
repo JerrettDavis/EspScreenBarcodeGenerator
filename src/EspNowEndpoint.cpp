@@ -158,11 +158,11 @@ void EspNowEndpoint::processDatagram(const RxDatagram& datagram) {
     CodecError envelopeError;
     if (!decodeEnvelope(assembled.data(), assembled.size(), envelope, body, envelopeError)) return;
 
-    processMessage(datagram.mac, envelope, body);
+    processMessage(datagram.mac, header.linkMessageId, envelope, body);
 }
 
-void EspNowEndpoint::processMessage(const std::array<uint8_t, 6>& fromMac, const MessageEnvelope& envelope,
-                                    const std::vector<uint8_t>& body) {
+void EspNowEndpoint::processMessage(const std::array<uint8_t, 6>& fromMac, uint32_t linkMessageId,
+                                    const MessageEnvelope& envelope, const std::vector<uint8_t>& body) {
     JsonDocument document;
     if (deserializeJson(document, body.data(), body.size())) return;
     JsonObjectConst wrapper = document.as<JsonObjectConst>();
@@ -183,11 +183,14 @@ void EspNowEndpoint::processMessage(const std::array<uint8_t, 6>& fromMac, const
     }
 
     // Secure Pairing enforcement: once enabled, only a sender whose MAC already has a trust
-    // record is allowed through to command dispatch. Trust/Gateway traffic is exempt (handled
-    // above already, before this point is ever reached) since it's needed to establish trust
-    // and keep gateway discovery working regardless of pairing state.
-    if (trustConfig_.securePairingEnabled() && trustConfig_.store().findByMac(fromMac) == nullptr) {
-        return;  // not a trusted peer: drop
+    // record is allowed through to command dispatch, AND its linkMessageId must be strictly
+    // greater than the last one seen from that peer (spec §2 "Anti-replay") -- a captured and
+    // replayed encrypted frame is otherwise indistinguishable from a fresh one. Trust/Gateway
+    // traffic is exempt (handled above already, before this point is ever reached) since it's
+    // needed to establish trust and keep gateway discovery working regardless of pairing state.
+    if (trustConfig_.securePairingEnabled() &&
+        !trustConfig_.mutableStore().checkAndAdvanceReplayGuard(fromMac, linkMessageId)) {
+        return;  // untrusted sender, or a replayed/duplicate/reordered frame: drop
     }
 
     if (envelope.kind != MessageKind::Command) return;  // this endpoint only accepts commands from a controller
@@ -198,6 +201,7 @@ void EspNowEndpoint::processMessage(const std::array<uint8_t, 6>& fromMac, const
     const char* v1Name = mapV2Name(name);
     currentRequestOperationId_ = envelope.operationId;
     currentRequestName_ = name;
+    currentRequestFromMac_ = fromMac;
 
     if (v1Name == nullptr) {
         sendError(ProtocolError{name, "unknown_command", "command not supported over EspLink v2 this release"});
@@ -341,7 +345,11 @@ void EspNowEndpoint::send(const Response& response) {
     std::string serialized;
     serializeJson(wrapper, serialized);
     const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
-    sendEnvelopeTo(kBroadcastAddress, MessageKind::Result, ServiceId::System, bodyBytes, currentRequestOperationId_);
+    sendEnvelopeTo(replyDestination(), MessageKind::Result, ServiceId::System, bodyBytes, currentRequestOperationId_);
+}
+
+const uint8_t* EspNowEndpoint::replyDestination() const {
+    return trustConfig_.securePairingEnabled() ? currentRequestFromMac_.data() : kBroadcastAddress;
 }
 
 void EspNowEndpoint::sendError(const ProtocolError& error) {
@@ -354,7 +362,7 @@ void EspNowEndpoint::sendError(const ProtocolError& error) {
     std::string serialized;
     serializeJson(wrapper, serialized);
     const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
-    sendEnvelopeTo(kBroadcastAddress, MessageKind::Error, ServiceId::System, bodyBytes, currentRequestOperationId_);
+    sendEnvelopeTo(replyDestination(), MessageKind::Error, ServiceId::System, bodyBytes, currentRequestOperationId_);
 }
 
 namespace {
