@@ -143,10 +143,20 @@ public sealed class GatewayLinkClient : IAsyncDisposable
         }).ToArray();
     }
 
-    /// <summary>Arms this gateway's pairing window against a specific discovered MAC — <c>trust.pair.begin</c>.</summary>
-    public Task BeginPairingAsync(string mac, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
-        => SendAsync(ServiceId.Trust, "trust.pair.begin", new JsonObject { ["mac"] = mac }, controlSessionId: 0,
+    /// <summary>
+    /// Arms this gateway's pairing window against a specific discovered MAC — <c>trust.pair.begin</c>.
+    /// Returns <c>false</c> (with no exception) if the gateway declined to start — e.g. a pairing
+    /// attempt is already in progress, the peer-table slot couldn't be allocated, or the crypto
+    /// handshake init failed (see <c>GatewayRelay::beginPairing</c>).
+    /// </summary>
+    public async Task<bool> BeginPairingAsync(
+        string mac, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        var body = await SendAsync(
+            ServiceId.Trust, "trust.pair.begin", new JsonObject { ["mac"] = mac }, controlSessionId: 0,
             timeout ?? TimeSpan.FromSeconds(5), cancellationToken);
+        return body["ok"]?.GetValue<bool>() ?? false;
+    }
 
     /// <summary>Cancels an in-progress pairing attempt — <c>trust.pair.cancel</c>.</summary>
     public Task CancelPairingAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
