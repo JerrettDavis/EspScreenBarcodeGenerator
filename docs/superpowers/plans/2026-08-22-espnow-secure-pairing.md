@@ -3211,9 +3211,12 @@ public async Task ConfigureFakeDevicesAsync(
   Scenario: Forgetting a trusted device removes it from the list
     Given I put the first device into gateway mode with a trusted device "A3F9-21C4"
     When I open the Gateway page
+    And I click "Refresh Trust List" for that device
     And I click "Forget" for that device
     Then the Gateway page shows no trusted devices for that device
 ```
+
+(Note for the implementer: Task 10's review found and fixed a gap where the trust list never auto-loads on page open — a manual `data-testid="gateway-refresh-trust"` "Refresh Trust List" button was added as the fix, matching the existing "Refresh Peers" pattern. This scenario's seeded trusted device won't appear until that button is clicked, so the added step above is required — without it, the `gateway-trust-forget` button the next step needs would not be rendered yet.)
 
 - [ ] **Step 4: Implement the step definitions** in `GatewayStepDefinitions.cs`, matching the existing method/locator style exactly:
 
@@ -3231,6 +3234,13 @@ public async Task ConfigureFakeDevicesAsync(
     {
         await Page.Locator("[data-testid=gateway-pair-new-device]").First.ClickAsync();
         await Task.Delay(1200); // matches the poll timer's ~1s cadence (Task 10 Step 3)
+    }
+
+    [When("I click \"Refresh Trust List\" for that device")]
+    public async Task WhenIClickRefreshTrustList()
+    {
+        await Page.Locator("[data-testid=gateway-refresh-trust]").First.ClickAsync();
+        await Task.Delay(300);
     }
 
     [When("I click \"Forget\" for that device")]
