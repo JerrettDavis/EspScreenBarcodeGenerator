@@ -784,11 +784,32 @@ void BarcodeApplication::updateTrustPairingStatus(bool discovering, const std::s
     const bool changed = discovering != trustDiscovering_ || peerFingerprint != trustPeerFingerprint_ ||
                          numericCode != trustNumericCode_ || committed != trustCommitted_ ||
                          cancelled != trustCancelled_;
+
+    // Rising edge of "there is now a code for a human to compare". A fingerprint is only ever
+    // non-empty while the session is AwaitingApproval -- the single state a local Confirm/Deny tap
+    // is still outstanding in (see EspNowEndpoint/GatewayRelay::pairingStatus, which source it
+    // from TrustPairingSession::currentOutcome's AwaitingApproval-only guard). A trusted-peer
+    // reconnect auto-confirms straight past that state without ever populating a fingerprint, so
+    // it deliberately does NOT trip this edge and stays silent, as the design spec requires.
+    const bool approvalJustArrived = !peerFingerprint.empty() && trustPeerFingerprint_.empty();
+
     trustDiscovering_ = discovering;
     trustPeerFingerprint_ = peerFingerprint;
     trustNumericCode_ = numericCode;
     trustCommitted_ = committed;
     trustCancelled_ = cancelled;
+
+    if (approvalJustArrived && view_ != View::Trust) {
+        // The design spec requires a device that receives a trust.pair.begin to surface its
+        // approval overlay *unsolicited*: the responder's human never navigated anywhere, and the
+        // pairing window expires on its own if nobody notices. Without this, a responder sitting
+        // on Home/Barcode/anywhere else would show nothing at all and the attempt would silently
+        // time out. Only the rising edge forces the switch, so a user already engaging with the
+        // overlay is never yanked around by subsequent status ticks.
+        view_ = View::Trust;
+        drawTrust();  // applies View::Trust's own orientation
+        return;
+    }
     if (changed && view_ == View::Trust) drawTrust();
 }
 

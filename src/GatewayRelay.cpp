@@ -603,6 +603,10 @@ GatewayRelay::TrustPairingUiStatus GatewayRelay::pairingStatus() const {
         case TrustPairingState::AwaitingApproval:
         case TrustPairingState::AwaitingPeerConfirm:
             status.state = TrustPairingUiState::AwaitingApproval;
+            // currentOutcome() only yields a fingerprint/code in AwaitingApproval -- the one state
+            // a local tap is still outstanding in -- so a trusted-peer reconnect (which
+            // auto-confirms straight through to AwaitingPeerConfirm) leaves both empty and stays
+            // silent on the Trust screen. Same contract as EspNowEndpoint's (Task 6).
             if (trustPairing_.currentOutcome(outcome)) {
                 TrustHash hash{};
                 trustCrypto_.sha256(outcome.peerStaticPublicKey.data(), outcome.peerStaticPublicKey.size(), hash);
@@ -844,8 +848,13 @@ bool GatewayRelay::handleTrustFromUsb(const HopFrameHeader& sourceHeader, const 
             responseWrapper["error"]["message"] = "mac must be formatted AA:BB:CC:DD:EE:FF";
         }
     } else if (std::strcmp(name, "trust.pair.cancel") == 0) {
-        denyPairing();
-        responseWrapper["body"]["ok"] = true;
+        // Only cancel something that's actually in flight. Calling denyPairing() unconditionally
+        // drove an Idle session to Cancelled, so a stray host cancel made the next
+        // trust.pair.status report "cancelled" for an attempt that never existed -- the same
+        // guard the ESP-NOW-side cancel branch already applies.
+        const bool inFlight = isPairingInFlight(trustPairing_.state());
+        if (inFlight) denyPairing();
+        responseWrapper["body"]["ok"] = inFlight;
     } else if (std::strcmp(name, "trust.pair.status") == 0) {
         const TrustPairingUiStatus status = pairingStatus();
         JsonObject responseBody = responseWrapper["body"].to<JsonObject>();
@@ -856,8 +865,14 @@ bool GatewayRelay::handleTrustFromUsb(const HopFrameHeader& sourceHeader, const 
             case TrustPairingUiState::Committed: responseBody["state"] = "committed"; break;
             case TrustPairingUiState::Cancelled: responseBody["state"] = "cancelled"; break;
         }
-        if (!status.peerFingerprint.empty()) responseBody["fingerprint"] = status.peerFingerprint;
-        if (status.numericCode != 0) responseBody["numeric_code"] = status.numericCode;
+        // Emitted unconditionally while awaiting approval, including a legitimately-derived
+        // numeric code of 0 (1-in-a-million, but it would otherwise render as a blank code in the
+        // Blazor Trust card and leave the operator with nothing to compare). Outside that state
+        // there is genuinely nothing to report, so the fields stay absent.
+        if (status.state == TrustPairingUiState::AwaitingApproval) {
+            responseBody["fingerprint"] = status.peerFingerprint;
+            responseBody["numeric_code"] = status.numericCode;
+        }
     } else {
         responseWrapper["error"]["code"] = "unknown_command";
         responseWrapper["error"]["message"] = "trust command not supported this release";

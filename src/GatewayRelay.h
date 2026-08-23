@@ -71,6 +71,9 @@ public:
     struct TrustPairingUiStatus {
         TrustPairingUiState state = TrustPairingUiState::Idle;
         std::string peerFingerprint;
+        // Non-empty/non-zero ONLY while a local human tap is still outstanding -- same contract
+        // as EspNowEndpoint's (Task 6): a trusted-peer reconnect auto-confirms and never
+        // populates them, keeping it silent on-screen.
         uint32_t numericCode = 0;
     };
 

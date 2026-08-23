@@ -75,6 +75,10 @@ public:
     struct TrustPairingUiStatus {
         TrustPairingUiState state = TrustPairingUiState::Idle;
         std::string peerFingerprint;
+        // Non-empty/non-zero ONLY while a local human tap is still outstanding -- see
+        // pairingStatus(), which sources them from currentOutcome()'s AwaitingApproval-only
+        // guard. A trusted-peer reconnect auto-confirms and therefore never populates them, which
+        // is what keeps it silent on-screen.
         uint32_t numericCode = 0;
     };
 

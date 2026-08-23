@@ -514,6 +514,12 @@ EspNowEndpoint::TrustPairingUiStatus EspNowEndpoint::pairingStatus() const {
         case TrustPairingState::AwaitingApproval:
         case TrustPairingState::AwaitingPeerConfirm:
             status.state = TrustPairingUiState::AwaitingApproval;
+            // currentOutcome() deliberately only yields a fingerprint/code in AwaitingApproval --
+            // the one state a local tap is still outstanding in. In AwaitingPeerConfirm this side
+            // has already confirmed (by human tap, or automatically on a trusted-peer reconnect)
+            // and both fields stay empty/zero, which is what keeps a silent reconnect silent on
+            // the Trust screen. BarcodeApplication relies on that: a non-empty fingerprint is its
+            // signal that a human comparison is genuinely being asked for.
             if (trustPairing_.currentOutcome(outcome)) {
                 TrustHash hash{};
                 trustCrypto_.sha256(outcome.peerStaticPublicKey.data(), outcome.peerStaticPublicKey.size(), hash);
