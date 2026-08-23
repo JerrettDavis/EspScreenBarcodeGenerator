@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 #include <array>
 #include <cstdint>
@@ -11,6 +12,9 @@
 #include "FrameAssembler.h"
 #include "GatewayStats.h"
 #include "HopFrame.h"
+#include "TrustConfigStore.h"
+#include "TrustCrypto.h"
+#include "TrustPairingSession.h"
 
 namespace esplink {
 
@@ -58,6 +62,41 @@ public:
     };
     Stats stats() const;
 
+    // Secure Pairing (docs/superpowers/specs/2026-08-22-espnow-secure-pairing-design.md) — a
+    // duplicate of EspNowEndpoint::TrustPairingUiState/TrustPairingUiStatus (Task 6). GatewayRelay
+    // and EspNowEndpoint are independent classes with no shared base or common header for this
+    // UI-facing value, so this follows the same "duplicate the small value type" choice already
+    // made for formatMac() between these two files.
+    enum class TrustPairingUiState : uint8_t { Idle, Discovering, AwaitingApproval, Committed, Cancelled };
+    struct TrustPairingUiStatus {
+        TrustPairingUiState state = TrustPairingUiState::Idle;
+        std::string peerFingerprint;
+        uint32_t numericCode = 0;
+    };
+
+    // Starts pairing with a specific client MAC (the USB host learns candidate MACs from the
+    // gateway stats' discovered-peers list). Unlike EspNowEndpoint (inherently 1:1 with a single
+    // gateway), GatewayRelay fans out to potentially several paired clients, so this can be called
+    // once per target while no other attempt is in flight.
+    bool beginPairing(const std::array<uint8_t, 6>& targetMac);
+    void confirmPairing();
+    void denyPairing();
+    TrustPairingUiStatus pairingStatus() const;
+    const esplink::TrustStore& trustedPeers() const { return trustConfig_.store(); }
+    // Looks up a record by its displayed fingerprint and forgets it. Returns false if no record
+    // matches. Same contract as EspNowEndpoint's (Task 6).
+    bool forgetByFingerprint(const std::string& fingerprint);
+    // One fingerprint string per trusted record, same order as trustedPeers(). Same contract as
+    // EspNowEndpoint's (Task 6).
+    std::vector<std::string> fingerprintList() const;
+    // One MAC per trusted record, same order/index as fingerprintList(). Same contract as
+    // EspNowEndpoint's (Task 6).
+    std::vector<std::array<uint8_t, 6>> macList() const;
+    bool setSecurePairingEnabled(bool value, std::string& error) {
+        return trustConfig_.setSecurePairingEnabled(value, error);
+    }
+    bool securePairingEnabled() const { return trustConfig_.securePairingEnabled(); }
+
 private:
     struct RxDatagram {
         std::array<uint8_t, kEspNowMaxDatagramBytes> bytes{};
@@ -90,6 +129,30 @@ private:
     void sendUsbGatewayResponse(const HopFrameHeader& requestHeader, const MessageEnvelope& requestEnvelope,
                                const std::vector<uint8_t>& bodyBytes);
 
+    // Trust/pairing handshake handling (ServiceId::Trust, "trust.pair.begin/confirm/cancel") and
+    // the USB-facing trust.* management commands — handled independently of the pure-relay path
+    // above, same rationale as the gateway-discovery side channel. See EspNowEndpoint's identical
+    // (Task 6) handling for the precedent this mirrors; GatewayRelay differs only in fanning out
+    // to multiple clients (routeId-based routing, see relayToEspNow) instead of being 1:1.
+    void handleTrustFromEspNow(const std::array<uint8_t, 6>& fromMac, JsonObjectConst wrapper);
+    bool handleTrustFromUsb(const HopFrameHeader& sourceHeader, const MessageEnvelope& envelope,
+                           JsonObjectConst wrapper);
+    void sendTrustFrameTo(const std::array<uint8_t, 6>& toMac, const char* name, JsonObject body);
+    bool ensureUnencryptedPeer(const std::array<uint8_t, 6>& mac);
+    bool upgradeToEncryptedPeer(const std::array<uint8_t, 6>& mac, const std::array<uint8_t, 16>& lmk);
+    // Deletes the ESP-NOW peer-table entry for `mac` unless it belongs to an already-established
+    // trust record -- some *other*, successful pairing put it there, and it must survive this
+    // attempt's failure/cancellation/timeout undisturbed. Used by every path that ends a pairing
+    // attempt without a successful commit (timeout, deny, incoming cancel, a rejected hello, a
+    // failed peer registration, a failed persist).
+    void evictUntrustedPeer(const std::array<uint8_t, 6>& mac);
+    // Called once trustPairing_ has reached Committed (from confirmPairing() or an incoming
+    // trust.pair.confirm) to persist the record and switch the peer over to encrypted comms. If
+    // persistence fails, this is treated as a failed attempt rather than silently proceeding as if
+    // it had succeeded: nothing gets encrypted, the temporary peer entry is evicted, and the
+    // session moves to Cancelled instead of staying Committed.
+    void finalizePairingCommit(const std::array<uint8_t, 6>& mac);
+
     FrameAssembler usbAssembler_;
     FrameAssembler espNowAssembler_;
     std::vector<uint8_t> rxBlock_;  // USB COBS accumulation buffer
@@ -100,6 +163,16 @@ private:
     std::string deviceId_;
     uint32_t lastDiscoveryPingMs_ = 0;
     static constexpr uint32_t kDiscoveryPingIntervalMs = 2000;
+
+    // Trust/pairing state (Secure Pairing) — persisted trust records/identity plus this attempt's
+    // in-progress handshake state machine, if any. trustCrypto_ must be declared before
+    // trustPairing_ (its default member initializer captures a reference to trustCrypto_, and
+    // default member initializers run in declaration order).
+    TrustConfigStore trustConfig_;
+    esplink::TrustCrypto trustCrypto_;
+    esplink::TrustPairingSession trustPairing_{trustCrypto_};
+    std::array<uint8_t, 6> pairingTargetMac_{};
+    bool pairingIsInitiator_ = false;
 
     std::array<RxDatagram, kEspNowRxQueueCapacity> rxQueue_{};
     volatile std::size_t rxHead_ = 0;  // next slot loop() reads
