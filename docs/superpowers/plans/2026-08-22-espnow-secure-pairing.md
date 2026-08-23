@@ -1634,6 +1634,10 @@ bool forgetByFingerprint(const std::string& fingerprint);
 // screen (Task 8) renders this directly instead of recomputing fingerprints itself, since that
 // needs trustCrypto_'s sha256(), which is private to this class.
 std::vector<std::string> fingerprintList() const;
+// One MAC per trusted record, same order/index as fingerprintList() -- the on-device Trust
+// screen (Task 8) zips the two together into TrustPeerRow so it can compare a discovered peer's
+// MAC against already-trusted MACs directly, without string-comparing fingerprints.
+std::vector<std::array<uint8_t, 6>> macList() const;
 bool setSecurePairingEnabled(bool value, std::string& error) { return trustConfig_.setSecurePairingEnabled(value, error); }
 bool securePairingEnabled() const { return trustConfig_.securePairingEnabled(); }
 
@@ -1819,6 +1823,12 @@ std::vector<std::string> EspNowEndpoint::fingerprintList() const {
         trustCrypto_.sha256(record->staticPublicKey.data(), record->staticPublicKey.size(), hash);
         out.push_back(esplink::trustFingerprint(hash));
     }
+    return out;
+}
+
+std::vector<std::array<uint8_t, 6>> EspNowEndpoint::macList() const {
+    std::vector<std::array<uint8_t, 6>> out;
+    for (std::size_t i = 0; i < trustConfig_.store().size(); ++i) out.push_back(trustConfig_.store().at(i)->mac);
     return out;
 }
 
@@ -2018,6 +2028,7 @@ TrustPairingUiStatus pairingStatus() const;
 const esplink::TrustStore& trustedPeers() const { return trustConfig_.store(); }
 bool forgetByFingerprint(const std::string& fingerprint);  // same contract as EspNowEndpoint's (Task 6)
 std::vector<std::string> fingerprintList() const;          // same contract as EspNowEndpoint's (Task 6)
+std::vector<std::array<uint8_t, 6>> macList() const;        // same contract as EspNowEndpoint's (Task 6)
 bool setSecurePairingEnabled(bool value, std::string& error) { return trustConfig_.setSecurePairingEnabled(value, error); }
 bool securePairingEnabled() const { return trustConfig_.securePairingEnabled(); }
 
@@ -2203,6 +2214,12 @@ std::vector<std::string> GatewayRelay::fingerprintList() const {
         trustCrypto_.sha256(record->staticPublicKey.data(), record->staticPublicKey.size(), hash);
         out.push_back(esplink::trustFingerprint(hash));
     }
+    return out;
+}
+
+std::vector<std::array<uint8_t, 6>> GatewayRelay::macList() const {
+    std::vector<std::array<uint8_t, 6>> out;
+    for (std::size_t i = 0; i < trustConfig_.store().size(); ++i) out.push_back(trustConfig_.store().at(i)->mac);
     return out;
 }
 
@@ -2473,8 +2490,12 @@ enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcod
 // New public methods (alongside enterGatewayMode()):
 void updateTrustPairingStatus(bool discovering, const std::string& peerFingerprint, uint32_t numericCode,
                               bool committed, bool cancelled);
-void updateGatewayRelayTrustedPeers(const std::vector<std::string>& fingerprints);
-void updateEspNowTrustedPeers(const std::vector<std::string>& fingerprints);
+// fingerprints/macs are parallel arrays, same order/length -- see GatewayRelay::fingerprintList()/
+// macList() (Task 7) and EspNowEndpoint's identical pair (Task 6).
+void updateGatewayRelayTrustedPeers(const std::vector<std::string>& fingerprints,
+                                    const std::vector<std::array<uint8_t, 6>>& macs);
+void updateEspNowTrustedPeers(const std::vector<std::string>& fingerprints,
+                              const std::vector<std::array<uint8_t, 6>>& macs);
 bool consumeTrustPairRequest(std::array<uint8_t, 6>& outTargetMac);  // "Pair new device" tapped
 bool consumeTrustConfirmRequest();
 bool consumeTrustDenyRequest();
@@ -2623,17 +2644,99 @@ Add the small `TrustPeerRow` value type and the two per-mode snapshot members ne
 ```cpp
 struct TrustPeerRow {
     std::string fingerprint;
-    Rect forgetButtonRect;  // last-drawn hit-test rect for this row, filled by drawTrust()
+    std::array<uint8_t, 6> mac{};
 };
 std::vector<TrustPeerRow> gatewayRelayTrustedPeers_;
 std::vector<TrustPeerRow> espNowTrustedPeers_;
 ```
 
-(`handleTrustTouch`'s per-row Forget tap test reuses each row's stored `forgetButtonRect`, the same way `drawTrust()` computed `forgetBtn` above — store it into `TrustPeerRow::forgetButtonRect` as each row is drawn rather than recomputing row geometry in the touch handler.)
+(`handleTrustTouch`'s per-row Forget tap test recomputes each row's rect from the same `listCard`/`peerRowH` geometry `drawTrust()` used, the same way `handleGatewayTouch`/`handleSettingsTouch` already recompute button rects from scratch rather than caching them from the last draw — no stored per-row rect needed.)
 
 (the discovered-peers picker for "Pair new device" reuses the existing `gatewayLinkStatus_`/`gatewayStats_.linkStats.peers` data Task 6/7 already populate — tapping "PAIR NEW DEVICE" when not gateway-mode picks the single currently-discovered gateway MAC directly, since `EspNowEndpoint` is inherently 1:1; in gateway mode it shows the peer list from `gatewayStats_.linkStats.peers` filtered to MACs not already in `trustedPeers()`, same list `drawGateway()` already renders, and tapping a row sets `trustPairTargetMac_`/`trustPairRequested_`.)
 
-- [ ] **Step 5: Implement `handleTrustTouch()`** mirroring `handleGatewayTouch`'s shape: back-chevron, pair button, confirm/deny buttons when awaiting approval, per-row forget taps when listing trusted peers.
+- [ ] **Step 5: Implement `handleTrustTouch()`** mirroring `handleGatewayTouch`'s shape: back-chevron, pair button, confirm/deny buttons when awaiting approval, per-row forget taps when listing trusted peers. The pending-approval and idle-list layouts are mutually exclusive (same condition `drawTrust()` branches on), so the touch handler branches the same way. Add a small file-local `macFromString` helper to `BarcodeApplication.cpp` (this file already duplicates small MAC-formatting helpers rather than sharing them — see `formatMac`'s independent copies in `EspNowEndpoint.cpp`/`GatewayRelay.cpp`):
+
+```cpp
+namespace {
+bool macFromString(const std::string& text, std::array<uint8_t, 6>& out) {
+    unsigned values[6];
+    if (std::sscanf(text.c_str(), "%02x:%02x:%02x:%02x:%02x:%02x", &values[0], &values[1], &values[2], &values[3],
+                    &values[4], &values[5]) != 6) {
+        return false;
+    }
+    for (int i = 0; i < 6; ++i) out[static_cast<std::size_t>(i)] = static_cast<uint8_t>(values[i]);
+    return true;
+}
+}  // namespace
+
+void BarcodeApplication::handleTrustTouch(uint16_t x, uint16_t y) {
+    if (handleSubHeaderTouch(x, y, View::Home)) return;
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const int16_t contentTop = subHeaderHeight(width, height);
+
+    if (trustDiscovering_ || !trustPeerFingerprint_.empty()) {
+        if (trustDiscovering_) return;  // no buttons yet, just waiting on the peer's reply
+        const Rect card = settingsCardRect(width, height, contentTop);
+        const Rect confirmBtn{static_cast<int16_t>(card.x + 12), static_cast<int16_t>(card.y + card.h - 44),
+                             static_cast<int16_t>(card.w / 2 - 18), 32};
+        const Rect denyBtn{static_cast<int16_t>(card.x + card.w / 2 + 6), static_cast<int16_t>(card.y + card.h - 44),
+                          static_cast<int16_t>(card.w / 2 - 18), 32};
+        if (confirmBtn.contains(x, y, kTouchPad)) {
+            trustConfirmRequested_ = true;
+        } else if (denyBtn.contains(x, y, kTouchPad)) {
+            trustDenyRequested_ = true;
+        }
+        return;
+    }
+
+    const Rect pairButton = gatewayPingButtonRect(contentTop, width);
+    if (pairButton.contains(x, y, kTouchPad)) {
+        // Target MAC resolution mirrors the picker logic described above drawTrust() -- reuses
+        // gatewayLinkStatus_ (direct mode) or the first not-yet-trusted MAC in
+        // gatewayStats_.linkStats.peers (gateway mode).
+        if (!gatewayModeActive_) {
+            if (gatewayLinkStatus_.connected) {
+                std::array<uint8_t, 6> mac{};
+                if (macFromString(gatewayLinkStatus_.gatewayId, mac)) {
+                    trustPairTargetMac_ = mac;
+                    trustPairRequested_ = true;
+                }
+            }
+        } else {
+            for (std::size_t i = 0; i < gatewayStats_.linkStats.peerCount; ++i) {
+                const auto& candidate = gatewayStats_.linkStats.peers[i];
+                const bool alreadyTrusted =
+                    std::any_of(gatewayRelayTrustedPeers_.begin(), gatewayRelayTrustedPeers_.end(),
+                               [&](const TrustPeerRow& row) { return row.mac == candidate.mac; });
+                if (!alreadyTrusted) {
+                    trustPairTargetMac_ = candidate.mac;
+                    trustPairRequested_ = true;
+                    break;
+                }
+            }
+        }
+        return;
+    }
+
+    const int16_t listTop = static_cast<int16_t>(pairButton.y + pairButton.h + 8);
+    const Rect listCard = gatewayPeersCardRect(width, height, listTop);
+    if (!listCard.contains(x, y, 0)) return;
+
+    const std::vector<TrustPeerRow>& peers = gatewayModeActive_ ? gatewayRelayTrustedPeers_ : espNowTrustedPeers_;
+    const int16_t peerRowH = 16;
+    const int row = (static_cast<int>(y) - listCard.y - 4) / peerRowH;
+    if (row < 0 || static_cast<std::size_t>(row) >= peers.size()) return;
+    const int16_t rowY = static_cast<int16_t>(listCard.y + 4 + row * peerRowH);
+    const Rect forgetBtn{static_cast<int16_t>(listCard.x + listCard.w - 56), rowY, 48, peerRowH};
+    if (forgetBtn.contains(x, y, kTouchPad)) {
+        trustForgetFingerprint_ = peers[static_cast<std::size_t>(row)].fingerprint;
+        trustForgetRequested_ = true;
+    }
+}
+```
+
+(`alreadyTrusted` compares MACs directly via `TrustPeerRow::mac`, populated from `macList()` alongside `fingerprintList()` — see the `updateGatewayRelayTrustedPeers`/`updateEspNowTrustedPeers` signatures above.)
 
 - [ ] **Step 6: Wire `main.cpp`'s `loop()`** to shuttle requests between `BarcodeApplication` and whichever of `EspNowEndpoint`/`GatewayRelay` is active — mirroring the existing `consumeGatewayPingRequest()`/`gatewayRelay.pingNow()` pattern (lines 92–94, 99–100):
 
@@ -2651,7 +2754,7 @@ application.updateTrustPairingStatus(gwStatus.state == esplink::GatewayRelay::Tr
                                      gwStatus.peerFingerprint, gwStatus.numericCode,
                                      gwStatus.state == esplink::GatewayRelay::TrustPairingUiState::Committed,
                                      gwStatus.state == esplink::GatewayRelay::TrustPairingUiState::Cancelled);
-application.updateGatewayRelayTrustedPeers(gatewayRelay.fingerprintList());
+application.updateGatewayRelayTrustedPeers(gatewayRelay.fingerprintList(), gatewayRelay.macList());
 bool toggleValue = false;
 if (application.consumeSecurePairingToggleRequest(toggleValue)) {
     std::string toggleError;
@@ -2675,7 +2778,7 @@ application.updateTrustPairingStatus(directStatus.state == esplink::EspNowEndpoi
                                      directStatus.peerFingerprint, directStatus.numericCode,
                                      directStatus.state == esplink::EspNowEndpoint::TrustPairingUiState::Committed,
                                      directStatus.state == esplink::EspNowEndpoint::TrustPairingUiState::Cancelled);
-application.updateEspNowTrustedPeers(espNowEndpoint.fingerprintList());
+application.updateEspNowTrustedPeers(espNowEndpoint.fingerprintList(), espNowEndpoint.macList());
 bool directToggleValue = false;
 if (application.consumeSecurePairingToggleRequest(directToggleValue)) {
     std::string toggleError;
@@ -2685,17 +2788,23 @@ if (application.consumeSecurePairingToggleRequest(directToggleValue)) {
 }
 ```
 
-Add the two new `BarcodeApplication` methods these calls need (alongside `updateGatewayStats`/`updateGatewayLinkStatus`), each converting a fingerprint list into the `TrustPeerRow` list `drawTrust()` (Step 4) reads:
+Add the two new `BarcodeApplication` methods these calls need (alongside `updateGatewayStats`/`updateGatewayLinkStatus`), each zipping a fingerprint list and a mac list (same order/length, per `fingerprintList()`/`macList()`'s shared contract) into the `TrustPeerRow` list `drawTrust()`/`handleTrustTouch()` read:
 
 ```cpp
-void BarcodeApplication::updateGatewayRelayTrustedPeers(const std::vector<std::string>& fingerprints) {
+void BarcodeApplication::updateGatewayRelayTrustedPeers(const std::vector<std::string>& fingerprints,
+                                                        const std::vector<std::array<uint8_t, 6>>& macs) {
     gatewayRelayTrustedPeers_.clear();
-    for (const auto& fingerprint : fingerprints) gatewayRelayTrustedPeers_.push_back(TrustPeerRow{fingerprint, {}});
+    for (std::size_t i = 0; i < fingerprints.size(); ++i) {
+        gatewayRelayTrustedPeers_.push_back(TrustPeerRow{fingerprints[i], macs[i]});
+    }
 }
 
-void BarcodeApplication::updateEspNowTrustedPeers(const std::vector<std::string>& fingerprints) {
+void BarcodeApplication::updateEspNowTrustedPeers(const std::vector<std::string>& fingerprints,
+                                                  const std::vector<std::array<uint8_t, 6>>& macs) {
     espNowTrustedPeers_.clear();
-    for (const auto& fingerprint : fingerprints) espNowTrustedPeers_.push_back(TrustPeerRow{fingerprint, {}});
+    for (std::size_t i = 0; i < fingerprints.size(); ++i) {
+        espNowTrustedPeers_.push_back(TrustPeerRow{fingerprints[i], macs[i]});
+    }
 }
 ```
 
