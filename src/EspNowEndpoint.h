@@ -14,6 +14,9 @@
 #include "Envelope.h"
 #include "FrameAssembler.h"
 #include "HopFrame.h"
+#include "TrustConfigStore.h"
+#include "TrustCrypto.h"
+#include "TrustPairingSession.h"
 
 namespace esplink {
 
@@ -65,22 +68,71 @@ public:
     // (see ControlProtocolEngine::setGatewayLinkStatusSource).
     GatewayLinkInfo gatewayLinkStatus() const override;
 
+    // Secure Pairing (docs/superpowers/specs/2026-08-22-espnow-secure-pairing-design.md) — the
+    // on-device Trust screen (Task 8) drives pairing through these, and reads trust state
+    // through trustedPeers()/fingerprintList()/macList()/forgetByFingerprint() below.
+    enum class TrustPairingUiState : uint8_t { Idle, Discovering, AwaitingApproval, Committed, Cancelled };
+    struct TrustPairingUiStatus {
+        TrustPairingUiState state = TrustPairingUiState::Idle;
+        std::string peerFingerprint;
+        uint32_t numericCode = 0;
+    };
+
+    // Starts pairing with a specific MAC seen via the existing discovery ping/pong (see
+    // gatewayLinkStatus()/lastGatewayId_ -- the on-device UI, Task 8, offers this as "the
+    // currently-discovered gateway" since EspNowEndpoint is inherently 1:1 with a single gateway
+    // at a time).
+    bool beginPairing(const std::array<uint8_t, 6>& targetMac);
+    void confirmPairing();
+    void denyPairing();
+    TrustPairingUiStatus pairingStatus() const;
+    const TrustStore& trustedPeers() const { return trustConfig_.store(); }
+    // Looks up a record by its displayed fingerprint (same format trustFingerprint() produces)
+    // and forgets it. Returns false if no record matches. Used by the on-device Trust screen's
+    // "Forget" button (Task 8), which only has the fingerprint string shown on screen, not the
+    // raw public key.
+    bool forgetByFingerprint(const std::string& fingerprint);
+    // One fingerprint string per trusted record, same order as trustedPeers() -- the on-device
+    // Trust screen (Task 8) renders this directly instead of recomputing fingerprints itself,
+    // since that needs trustCrypto_'s sha256(), which is private to this class.
+    std::vector<std::string> fingerprintList() const;
+    // One MAC per trusted record, same order/index as fingerprintList() -- the on-device Trust
+    // screen (Task 8) zips the two together into TrustPeerRow so it can compare a discovered
+    // peer's MAC against already-trusted MACs directly, without string-comparing fingerprints.
+    std::vector<std::array<uint8_t, 6>> macList() const;
+    bool setSecurePairingEnabled(bool value, std::string& error) {
+        return trustConfig_.setSecurePairingEnabled(value, error);
+    }
+    bool securePairingEnabled() const { return trustConfig_.securePairingEnabled(); }
+
 private:
     struct RxDatagram {
         std::array<uint8_t, kMaxDatagramBytes> bytes{};
+        std::array<uint8_t, 6> mac{};
         std::size_t length = 0;
     };
 
     void processDatagram(const RxDatagram& datagram);
-    void processMessage(const MessageEnvelope& envelope, const std::vector<uint8_t>& body);
-    void sendEnvelope(MessageKind kind, ServiceId serviceId, const std::vector<uint8_t>& bodyBytes,
-                      uint64_t correlationId);
+    void processMessage(const std::array<uint8_t, 6>& fromMac, const MessageEnvelope& envelope,
+                        const std::vector<uint8_t>& body);
+    void sendEnvelopeTo(const uint8_t* destination, MessageKind kind, ServiceId serviceId,
+                       const std::vector<uint8_t>& bodyBytes, uint64_t correlationId);
 
     // The gateway-discovery ping/pong side channel — handled independently of the ordinary
     // command dispatch path above (it's Event-kind, not Command, and needs no ControlSession).
     void handleGatewayLinkMessage(JsonObjectConst wrapper);
     void maybeSendGatewayProbe();
     void sendGatewayLinkEvent(const char* eventName, uint32_t echoTs);
+
+    // Trust/pairing handshake handling (ServiceId::Trust, "trust.pair.begin/confirm/cancel") --
+    // handled independently of the ordinary command dispatch path, same rationale as the
+    // gateway-discovery side channel above.
+    void handleTrustMessage(const uint8_t* fromMac, JsonObjectConst wrapper);
+    void sendTrustHello(const std::array<uint8_t, 6>& toMac, const TrustHelloMessage& hello);
+    void sendTrustConfirm(const std::array<uint8_t, 6>& toMac, const TrustSignature& signature);
+    void sendTrustCancel(const std::array<uint8_t, 6>& toMac);
+    bool ensureUnencryptedPeer(const std::array<uint8_t, 6>& mac);
+    bool upgradeToEncryptedPeer(const std::array<uint8_t, 6>& mac, const std::array<uint8_t, kTrustLmkBytes>& lmk);
 
     static const char* mapV2Name(const std::string& name);
 
@@ -104,6 +156,16 @@ private:
     std::string lastGatewayId_;
     uint32_t lastProbeSentMs_ = 0;
     uint32_t lastProbeTs_ = 0;         // the `ts` this board embedded in its most recent probe
+
+    // Trust/pairing state (Secure Pairing) — persisted trust records/identity plus this
+    // attempt's in-progress handshake state machine, if any. trustCrypto_ must be declared
+    // before trustPairing_ (its default member initializer captures a reference to trustCrypto_,
+    // and default member initializers run in declaration order).
+    TrustConfigStore trustConfig_;
+    TrustCrypto trustCrypto_;
+    TrustPairingSession trustPairing_{trustCrypto_};
+    std::array<uint8_t, 6> pairingTargetMac_{};
+    bool pairingIsInitiator_ = false;
 
     // Fixed-capacity ring buffer filled by the ESP-NOW receive callback, drained by loop().
     // A full queue drops the newest datagram rather than growing — bounded memory per

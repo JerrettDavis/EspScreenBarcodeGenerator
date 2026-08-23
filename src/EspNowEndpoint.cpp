@@ -7,17 +7,21 @@
 #include <cstdio>
 #include <cstring>
 
+#include "EspBarcodeCore.h"  // bytesToBase64/bytesFromBase64
 #include "Fragmenter.h"
 #include "JsonCommandCodec.h"
+
+using namespace espbarcode;
 
 namespace esplink {
 
 namespace {
 // ESP-NOW requires both peers to share a fixed radio channel before pairing; there is no
 // channel-negotiation handshake in this compatibility profile. Broadcasting on the
-// broadcast address means this endpoint accepts commands from *any* peer on this channel —
-// acceptable for this bench-validated compatibility profile, where trust/pairing (design
-// plan §7.7) is explicitly out of scope until a later PR (docs/PROTOCOL_V2.md §10).
+// broadcast address means any nearby peer on this channel can reach this endpoint at the
+// transport level; command-level access (everything except ServiceId::Trust/Gateway) is
+// restricted to already-trusted senders once Secure Pairing is enabled -- see the enforcement
+// check in processMessage() and TrustConfigStore::securePairingEnabled().
 constexpr uint8_t kEspNowChannel = 1;
 const uint8_t kBroadcastAddress[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
@@ -77,11 +81,18 @@ bool EspNowEndpoint::begin(std::string& error) {
     uint8_t mac[6];
     WiFi.macAddress(mac);
     macAddress_ = formatMac(mac);
+
+    // Trust crypto must begin() only after Wi-Fi/ESP-NOW is up (see TrustCrypto.h -- esp_random()
+    // needs the radio initialized to be a true hardware RNG), which is exactly where we are now.
+    std::string trustError;
+    if (!trustCrypto_.begin(trustError) || !trustConfig_.begin(trustCrypto_, trustError)) {
+        error = "trust init failed: " + trustError;
+        return false;
+    }
     return true;
 }
 
 void EspNowEndpoint::enqueueReceived(const uint8_t* mac, const uint8_t* data, std::size_t length) {
-    (void)mac;  // this endpoint accepts any sender this session; see kBroadcastAddress note above
     if (length > kMaxDatagramBytes) return;  // cannot happen from a real ESP-NOW radio; defensive only
 
     portENTER_CRITICAL(&rxMux_);
@@ -93,6 +104,7 @@ void EspNowEndpoint::enqueueReceived(const uint8_t* mac, const uint8_t* data, st
     }
     RxDatagram& slot = rxQueue_[rxTail_];
     memcpy(slot.bytes.data(), data, length);
+    memcpy(slot.mac.data(), mac, slot.mac.size());
     slot.length = length;
     rxTail_ = nextTail;
     portEXIT_CRITICAL(&rxMux_);
@@ -129,10 +141,11 @@ void EspNowEndpoint::processDatagram(const RxDatagram& datagram) {
     CodecError envelopeError;
     if (!decodeEnvelope(assembled.data(), assembled.size(), envelope, body, envelopeError)) return;
 
-    processMessage(envelope, body);
+    processMessage(datagram.mac, envelope, body);
 }
 
-void EspNowEndpoint::processMessage(const MessageEnvelope& envelope, const std::vector<uint8_t>& body) {
+void EspNowEndpoint::processMessage(const std::array<uint8_t, 6>& fromMac, const MessageEnvelope& envelope,
+                                    const std::vector<uint8_t>& body) {
     JsonDocument document;
     if (deserializeJson(document, body.data(), body.size())) return;
     JsonObjectConst wrapper = document.as<JsonObjectConst>();
@@ -142,6 +155,22 @@ void EspNowEndpoint::processMessage(const MessageEnvelope& envelope, const std::
         // through ControlProtocolEngine (see the class comment above).
         handleGatewayLinkMessage(wrapper);
         return;
+    }
+
+    if (envelope.serviceId == ServiceId::Trust) {
+        // Pairing handshake traffic is likewise a separate side channel, and must always flow
+        // regardless of the Secure Pairing enforcement check below (it's how trust gets
+        // established in the first place).
+        handleTrustMessage(fromMac.data(), wrapper);
+        return;
+    }
+
+    // Secure Pairing enforcement: once enabled, only a sender whose MAC already has a trust
+    // record is allowed through to command dispatch. Trust/Gateway traffic is exempt (handled
+    // above already, before this point is ever reached) since it's needed to establish trust
+    // and keep gateway discovery working regardless of pairing state.
+    if (trustConfig_.securePairingEnabled() && trustConfig_.store().findByMac(fromMac) == nullptr) {
+        return;  // not a trusted peer: drop
     }
 
     if (envelope.kind != MessageKind::Command) return;  // this endpoint only accepts commands from a controller
@@ -215,7 +244,7 @@ void EspNowEndpoint::sendGatewayLinkEvent(const char* eventName, uint32_t echoTs
     std::string serialized;
     serializeJson(wrapper, serialized);
     const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
-    sendEnvelope(MessageKind::Event, ServiceId::Gateway, bodyBytes, 0);
+    sendEnvelopeTo(kBroadcastAddress, MessageKind::Event, ServiceId::Gateway, bodyBytes, 0);
 }
 
 GatewayLinkInfo EspNowEndpoint::gatewayLinkStatus() const {
@@ -241,8 +270,8 @@ const char* EspNowEndpoint::mapV2Name(const std::string& name) {
     return nullptr;
 }
 
-void EspNowEndpoint::sendEnvelope(MessageKind kind, ServiceId serviceId, const std::vector<uint8_t>& bodyBytes,
-                                  uint64_t correlationId) {
+void EspNowEndpoint::sendEnvelopeTo(const uint8_t* destination, MessageKind kind, ServiceId serviceId,
+                                    const std::vector<uint8_t>& bodyBytes, uint64_t correlationId) {
     MessageEnvelope envelope;
     envelope.kind = kind;
     envelope.serviceId = serviceId;
@@ -268,7 +297,7 @@ void EspNowEndpoint::sendEnvelope(MessageKind kind, ServiceId serviceId, const s
     }
 
     for (const auto& frame : frames) {
-        esp_now_send(kBroadcastAddress, frame.data(), frame.size());
+        esp_now_send(destination, frame.data(), frame.size());
     }
 }
 
@@ -295,7 +324,7 @@ void EspNowEndpoint::send(const Response& response) {
     std::string serialized;
     serializeJson(wrapper, serialized);
     const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
-    sendEnvelope(MessageKind::Result, ServiceId::System, bodyBytes, currentRequestOperationId_);
+    sendEnvelopeTo(kBroadcastAddress, MessageKind::Result, ServiceId::System, bodyBytes, currentRequestOperationId_);
 }
 
 void EspNowEndpoint::sendError(const ProtocolError& error) {
@@ -308,7 +337,273 @@ void EspNowEndpoint::sendError(const ProtocolError& error) {
     std::string serialized;
     serializeJson(wrapper, serialized);
     const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
-    sendEnvelope(MessageKind::Error, ServiceId::System, bodyBytes, currentRequestOperationId_);
+    sendEnvelopeTo(kBroadcastAddress, MessageKind::Error, ServiceId::System, bodyBytes, currentRequestOperationId_);
+}
+
+namespace {
+bool decodeHelloJson(JsonObjectConst body, TrustHelloMessage& out) {
+    std::vector<uint8_t> bytes;
+    if (!bytesFromBase64(body["staticPubKey"] | "", bytes) || bytes.size() != kTrustPublicKeyBytes) {
+        return false;
+    }
+    std::memcpy(out.staticPublicKey.data(), bytes.data(), bytes.size());
+    if (!bytesFromBase64(body["ephemeralPubKey"] | "", bytes) || bytes.size() != kTrustPublicKeyBytes) {
+        return false;
+    }
+    std::memcpy(out.ephemeralPublicKey.data(), bytes.data(), bytes.size());
+    if (!bytesFromBase64(body["nonce"] | "", bytes) || bytes.size() != kTrustNonceBytes) return false;
+    std::memcpy(out.nonce.data(), bytes.data(), bytes.size());
+    if (!bytesFromBase64(body["signature"] | "", bytes) || bytes.size() != kTrustSignatureBytes) {
+        return false;
+    }
+    std::memcpy(out.signature.data(), bytes.data(), bytes.size());
+    return true;
+}
+
+void encodeHelloJson(const TrustHelloMessage& hello, JsonObject body) {
+    body["staticPubKey"] =
+        bytesToBase64(std::vector<uint8_t>(hello.staticPublicKey.begin(), hello.staticPublicKey.end()));
+    body["ephemeralPubKey"] =
+        bytesToBase64(std::vector<uint8_t>(hello.ephemeralPublicKey.begin(), hello.ephemeralPublicKey.end()));
+    body["nonce"] = bytesToBase64(std::vector<uint8_t>(hello.nonce.begin(), hello.nonce.end()));
+    body["signature"] = bytesToBase64(std::vector<uint8_t>(hello.signature.begin(), hello.signature.end()));
+}
+}  // namespace
+
+bool EspNowEndpoint::ensureUnencryptedPeer(const std::array<uint8_t, 6>& mac) {
+    if (esp_now_is_peer_exist(mac.data())) return true;
+    esp_now_peer_info_t peer{};
+    memcpy(peer.peer_addr, mac.data(), 6);
+    peer.channel = 0;  // 0 = use the current channel, already fixed by begin()
+    peer.ifidx = WIFI_IF_STA;
+    peer.encrypt = false;
+    return esp_now_add_peer(&peer) == ESP_OK;
+}
+
+bool EspNowEndpoint::upgradeToEncryptedPeer(const std::array<uint8_t, 6>& mac,
+                                            const std::array<uint8_t, kTrustLmkBytes>& lmk) {
+    esp_now_del_peer(mac.data());
+    esp_now_peer_info_t peer{};
+    memcpy(peer.peer_addr, mac.data(), 6);
+    peer.channel = 0;
+    peer.ifidx = WIFI_IF_STA;
+    peer.encrypt = true;
+    memcpy(peer.lmk, lmk.data(), lmk.size());
+    return esp_now_add_peer(&peer) == ESP_OK;
+}
+
+bool EspNowEndpoint::beginPairing(const std::array<uint8_t, 6>& targetMac) {
+    if (trustPairing_.state() != TrustPairingState::Idle) return false;
+    if (!ensureUnencryptedPeer(targetMac)) return false;
+
+    TrustHelloMessage hello;
+    if (!trustPairing_.beginAsInitiator(trustConfig_.identity(), millis(), hello)) return false;
+    pairingTargetMac_ = targetMac;
+    pairingIsInitiator_ = true;
+    sendTrustHello(targetMac, hello);
+    return true;
+}
+
+void EspNowEndpoint::confirmPairing() {
+    TrustSignature signature{};
+    if (!trustPairing_.confirmLocally(millis(), signature)) return;
+    sendTrustConfirm(pairingTargetMac_, signature);
+    if (trustPairing_.state() == TrustPairingState::Committed) {
+        TrustRecord record;
+        record.staticPublicKey = trustPairing_.peerHello().staticPublicKey;
+        record.mac = pairingTargetMac_;
+        record.peerRole = TrustRole::Gateway;  // EspNowEndpoint always pairs with a gateway
+        record.pairedAtMs = millis();
+        std::string persistError;
+        trustConfig_.addRecord(record, persistError);  // a reconnect's record already exists;
+                                                        // addRecord no-ops (fails harmlessly)
+        upgradeToEncryptedPeer(pairingTargetMac_, trustPairing_.derivedKeys().lmk);
+        trustPairing_.reset();
+    }
+}
+
+void EspNowEndpoint::denyPairing() {
+    bool shouldSend = false;
+    trustPairing_.cancel(shouldSend);
+    if (shouldSend) sendTrustCancel(pairingTargetMac_);
+    esp_now_del_peer(pairingTargetMac_.data());
+    trustPairing_.reset();
+}
+
+EspNowEndpoint::TrustPairingUiStatus EspNowEndpoint::pairingStatus() const {
+    TrustPairingUiStatus status;
+    TrustPairingOutcome outcome;
+    switch (trustPairing_.state()) {
+        case TrustPairingState::Idle:
+            status.state = TrustPairingUiState::Idle;
+            break;
+        case TrustPairingState::AwaitingPeerHello:
+            status.state = TrustPairingUiState::Discovering;
+            break;
+        case TrustPairingState::AwaitingApproval:
+        case TrustPairingState::AwaitingPeerConfirm:
+            status.state = TrustPairingUiState::AwaitingApproval;
+            if (trustPairing_.currentOutcome(outcome)) {
+                TrustHash hash{};
+                trustCrypto_.sha256(outcome.peerStaticPublicKey.data(), outcome.peerStaticPublicKey.size(), hash);
+                status.peerFingerprint = trustFingerprint(hash);
+                status.numericCode = outcome.numericCode;
+            }
+            break;
+        case TrustPairingState::Committed:
+            status.state = TrustPairingUiState::Committed;
+            break;
+        case TrustPairingState::Cancelled:
+            status.state = TrustPairingUiState::Cancelled;
+            break;
+    }
+    return status;
+}
+
+std::vector<std::string> EspNowEndpoint::fingerprintList() const {
+    std::vector<std::string> out;
+    for (std::size_t i = 0; i < trustConfig_.store().size(); ++i) {
+        const TrustRecord* record = trustConfig_.store().at(i);
+        TrustHash hash{};
+        trustCrypto_.sha256(record->staticPublicKey.data(), record->staticPublicKey.size(), hash);
+        out.push_back(trustFingerprint(hash));
+    }
+    return out;
+}
+
+std::vector<std::array<uint8_t, 6>> EspNowEndpoint::macList() const {
+    std::vector<std::array<uint8_t, 6>> out;
+    for (std::size_t i = 0; i < trustConfig_.store().size(); ++i) out.push_back(trustConfig_.store().at(i)->mac);
+    return out;
+}
+
+bool EspNowEndpoint::forgetByFingerprint(const std::string& fingerprint) {
+    for (std::size_t i = 0; i < trustConfig_.store().size(); ++i) {
+        const TrustRecord* record = trustConfig_.store().at(i);
+        TrustHash hash{};
+        trustCrypto_.sha256(record->staticPublicKey.data(), record->staticPublicKey.size(), hash);
+        if (trustFingerprint(hash) == fingerprint) {
+            std::string error;
+            return trustConfig_.forgetRecord(record->staticPublicKey, error);
+        }
+    }
+    return false;
+}
+
+void EspNowEndpoint::handleTrustMessage(const uint8_t* fromMac, JsonObjectConst wrapper) {
+    std::array<uint8_t, 6> mac{};
+    std::memcpy(mac.data(), fromMac, 6);
+    const char* name = wrapper["name"] | "";
+    JsonObjectConst body = wrapper["body"].as<JsonObjectConst>();
+
+    if (std::strcmp(name, "trust.pair.begin") == 0) {
+        TrustHelloMessage peerHello;
+        if (!decodeHelloJson(body, peerHello)) return;
+
+        // A peer we already trust: verify the incoming hello against the *pinned* key on file,
+        // not just its own self-consistency signature -- a MAC-spoofing attacker presenting a
+        // different static key must be rejected outright rather than "verified against itself"
+        // (see verifyTrustHello's doc comment).
+        const TrustRecord* existing = trustConfig_.store().findByMac(mac);
+        if (existing != nullptr && !verifyTrustHello(trustCrypto_, existing->staticPublicKey, peerHello)) {
+            return;
+        }
+        if (!ensureUnencryptedPeer(mac)) return;
+
+        // Was this device already mid-handshake as the initiator, specifically awaiting this
+        // peer's reply? If so, this hello must be folded into *that* attempt --
+        // trustPairing_.onPeerHello() below, called while in AwaitingPeerHello, does exactly
+        // this using the ephemeral we already generated in beginPairing(). Generating a brand
+        // new ephemeral for every incoming hello instead (rather than reusing that one) would
+        // make the two sides derive a different session key on every round trip and never
+        // converge -- this check is what keeps a reconnect handshake to a single round trip.
+        const bool wasAwaitingOurOwnHello = pairingIsInitiator_ && pairingTargetMac_ == mac &&
+                                            trustPairing_.state() == TrustPairingState::AwaitingPeerHello;
+
+        TrustHelloMessage reply;
+        bool hasReply = false;
+        if (!trustPairing_.onPeerHello(peerHello, trustConfig_.identity(), millis(), reply, hasReply)) return;
+        if (!wasAwaitingOurOwnHello) {
+            // We're the responder to this attempt (fresh or reconnect) -- remember who, for
+            // confirmPairing()/denyPairing() and the auto-confirm below.
+            pairingTargetMac_ = mac;
+            pairingIsInitiator_ = false;
+        }
+        if (hasReply) sendTrustHello(mac, reply);
+
+        // Reconnect (design spec §1 "Reconnect"): the peer is already trusted by this device, so
+        // no human approval is needed on this side -- confirm immediately instead of waiting for
+        // a UI tap. First-time pairing (existing == nullptr) still waits for confirmPairing().
+        if (existing != nullptr) confirmPairing();
+        return;
+    }
+
+    if (std::strcmp(name, "trust.pair.confirm") == 0) {
+        if (mac != pairingTargetMac_) return;  // not the peer we're mid-handshake with
+
+        std::vector<uint8_t> signatureBytes;
+        if (!bytesFromBase64(body["confirmSignature"] | "", signatureBytes) ||
+            signatureBytes.size() != kTrustSignatureBytes) {
+            return;
+        }
+        TrustSignature signature{};
+        std::memcpy(signature.data(), signatureBytes.data(), signature.size());
+        if (!trustPairing_.onPeerConfirm(signature, millis())) return;
+        if (trustPairing_.state() == TrustPairingState::Committed) {
+            TrustRecord record;
+            record.staticPublicKey = trustPairing_.peerHello().staticPublicKey;
+            record.mac = mac;
+            record.peerRole = TrustRole::Gateway;
+            record.pairedAtMs = millis();
+            std::string persistError;
+            trustConfig_.addRecord(record, persistError);
+            upgradeToEncryptedPeer(mac, trustPairing_.derivedKeys().lmk);
+            trustPairing_.reset();
+        }
+        return;
+    }
+
+    if (std::strcmp(name, "trust.pair.cancel") == 0) {
+        // Only the peer we're actually mid-handshake with may cancel it -- otherwise any nearby
+        // sender could tear down an unrelated in-progress pairing attempt with a stray message.
+        if (mac == pairingTargetMac_ && trustPairing_.state() != TrustPairingState::Idle) {
+            esp_now_del_peer(mac.data());
+            trustPairing_.reset();
+        }
+    }
+}
+
+void EspNowEndpoint::sendTrustHello(const std::array<uint8_t, 6>& toMac, const TrustHelloMessage& hello) {
+    JsonDocument wrapper;
+    wrapper["schema"] = "esbg.control/2.0";
+    wrapper["name"] = "trust.pair.begin";
+    encodeHelloJson(hello, wrapper["body"].to<JsonObject>());
+    std::string serialized;
+    serializeJson(wrapper, serialized);
+    const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
+    sendEnvelopeTo(toMac.data(), MessageKind::Event, ServiceId::Trust, bodyBytes, 0);
+}
+
+void EspNowEndpoint::sendTrustConfirm(const std::array<uint8_t, 6>& toMac, const TrustSignature& signature) {
+    JsonDocument wrapper;
+    wrapper["schema"] = "esbg.control/2.0";
+    wrapper["name"] = "trust.pair.confirm";
+    wrapper["body"]["confirmSignature"] = bytesToBase64(std::vector<uint8_t>(signature.begin(), signature.end()));
+    std::string serialized;
+    serializeJson(wrapper, serialized);
+    const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
+    sendEnvelopeTo(toMac.data(), MessageKind::Event, ServiceId::Trust, bodyBytes, 0);
+}
+
+void EspNowEndpoint::sendTrustCancel(const std::array<uint8_t, 6>& toMac) {
+    JsonDocument wrapper;
+    wrapper["schema"] = "esbg.control/2.0";
+    wrapper["name"] = "trust.pair.cancel";
+    wrapper["body"].to<JsonObject>();
+    std::string serialized;
+    serializeJson(wrapper, serialized);
+    const std::vector<uint8_t> bodyBytes(serialized.begin(), serialized.end());
+    sendEnvelopeTo(toMac.data(), MessageKind::Event, ServiceId::Trust, bodyBytes, 0);
 }
 
 }  // namespace esplink
