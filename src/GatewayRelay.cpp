@@ -216,9 +216,13 @@ void GatewayRelay::relayToEspNow(const HopFrameHeader& sourceHeader, const std::
     // (Task 10/11 surface each paired client's routeId to the .NET host so it can do this), send
     // unicast to that specific trusted client instead of broadcasting to everyone in range. Until
     // a host sends a non-zero routeId (or Secure Pairing is off), behavior is unchanged from
-    // today's broadcast-everything.
+    // today's broadcast-everything -- but a routeId that WAS stamped and doesn't resolve (e.g. the
+    // host still has a since-forgotten client's routeId cached) must never fall back to broadcast:
+    // that would leak a revoked client's traffic to every device in range in the clear, defeating
+    // the whole point of enforcing Secure Pairing. Drop it instead.
     const uint8_t* destination = kBroadcastAddress;
     if (trustConfig_.securePairingEnabled() && outHeader.routeId != 0) {
+        destination = nullptr;
         for (std::size_t i = 0; i < trustConfig_.store().size(); ++i) {
             const TrustRecord* record = trustConfig_.store().at(i);
             if (record->routeId == outHeader.routeId) {
@@ -226,6 +230,7 @@ void GatewayRelay::relayToEspNow(const HopFrameHeader& sourceHeader, const std::
                 break;
             }
         }
+        if (destination == nullptr) return;  // unresolvable routeId: drop, don't broadcast
     }
     for (const auto& frame : frames) esp_now_send(destination, frame.data(), frame.size());
 }
