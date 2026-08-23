@@ -274,6 +274,61 @@ void test_trust_store_enforces_cap() {
     TEST_ASSERT_FALSE(store.add(overflow));
 }
 
+// Route ids must survive a reload from persistence: TrustConfigStore::loadRecords() parses each
+// record's stored routeId and re-add()s it, and forget() is a swap-remove, so an add() that always
+// reassigned would permute which peer a given routeId points at after any revocation.
+void test_trust_store_preserves_loaded_route_ids() {
+    esplink::TrustStore store;
+
+    // Two records "reloaded from disk" with non-contiguous stored ids (what's left after the
+    // record that held routeId 1 and 2 was forgotten in an earlier session).
+    esplink::TrustRecord loadedThree;
+    loadedThree.staticPublicKey.fill(0x33);
+    loadedThree.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x33};
+    loadedThree.routeId = 3;
+    TEST_ASSERT_TRUE(store.add(loadedThree));
+    TEST_ASSERT_EQUAL_UINT16(3, store.findByStaticKey(loadedThree.staticPublicKey)->routeId);
+
+    esplink::TrustRecord loadedFive;
+    loadedFive.staticPublicKey.fill(0x55);
+    loadedFive.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x55};
+    loadedFive.routeId = 5;
+    TEST_ASSERT_TRUE(store.add(loadedFive));
+    TEST_ASSERT_EQUAL_UINT16(5, store.findByStaticKey(loadedFive.staticPublicKey)->routeId);
+
+    // A freshly-paired device (routeId still 0) takes the lowest free slot, skipping the loaded
+    // ids rather than colliding with them.
+    esplink::TrustRecord fresh;
+    fresh.staticPublicKey.fill(0x77);
+    fresh.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x77};
+    TEST_ASSERT_TRUE(store.add(fresh));
+    TEST_ASSERT_EQUAL_UINT16(1, store.findByStaticKey(fresh.staticPublicKey)->routeId);
+
+    // A stored id that collides with one already in use is NOT honored -- duplicates would make
+    // a routeId lookup ambiguous -- so it falls back to the lowest remaining free slot.
+    esplink::TrustRecord collides;
+    collides.staticPublicKey.fill(0x99);
+    collides.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x99};
+    collides.routeId = 3;  // already held by loadedThree
+    TEST_ASSERT_TRUE(store.add(collides));
+    TEST_ASSERT_EQUAL_UINT16(2, store.findByStaticKey(collides.staticPublicKey)->routeId);
+
+    // An out-of-range stored id is likewise rejected in favour of a real free slot.
+    esplink::TrustRecord outOfRange;
+    outOfRange.staticPublicKey.fill(0xBB);
+    outOfRange.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xBB};
+    outOfRange.routeId = 999;
+    TEST_ASSERT_TRUE(store.add(outOfRange));
+    TEST_ASSERT_EQUAL_UINT16(4, store.findByStaticKey(outOfRange.staticPublicKey)->routeId);
+
+    // Every id handed out is still unique across the whole store.
+    for (std::size_t i = 0; i < store.size(); ++i) {
+        for (std::size_t j = i + 1; j < store.size(); ++j) {
+            TEST_ASSERT_TRUE(store.at(i)->routeId != store.at(j)->routeId);
+        }
+    }
+}
+
 void test_trust_fingerprint_format() {
     esplink::TrustHash hash{};
     hash[0] = 0xA3;
@@ -369,8 +424,9 @@ void test_trust_pairing_cancel_and_timeout() {
 
     session.reset();
     session.beginAsInitiator(identity, 0, hello);
-    TEST_ASSERT_FALSE(session.tick(30000));   // well under the 60s default timeout
-    TEST_ASSERT_TRUE(session.tick(60001));    // past it
+    TEST_ASSERT_FALSE(session.tick(60000));   // well under the 120s default pairing window
+    TEST_ASSERT_FALSE(session.tick(119999));  // still inside it, right up to the boundary
+    TEST_ASSERT_TRUE(session.tick(120001));   // past it
     TEST_ASSERT_TRUE(esplink::TrustPairingState::Cancelled == session.state());
 }
 
@@ -410,6 +466,7 @@ int main(int, char**) {
     RUN_TEST(test_trust_hello_round_trip);
     RUN_TEST(test_trust_store_add_find_forget);
     RUN_TEST(test_trust_store_enforces_cap);
+    RUN_TEST(test_trust_store_preserves_loaded_route_ids);
     RUN_TEST(test_trust_fingerprint_format);
     RUN_TEST(test_trust_pairing_happy_path_both_confirm_first);
     RUN_TEST(test_trust_pairing_peer_confirms_before_us);

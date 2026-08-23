@@ -40,7 +40,10 @@ public:
     const TrustRecord* findByStaticKey(const TrustPublicKey& key) const;
     const TrustRecord* at(std::size_t index) const;
 
-    // Adds a new record, assigning the lowest routeId in [1, kMaxRecords] not already in use.
+    // Adds a new record. If `record.routeId` is already set to an in-range id that no other
+    // record holds (i.e. the record came back from persistence, or from an add/forget rollback),
+    // that id is preserved so route ids stay stable across reboots and revocations. Otherwise --
+    // routeId 0, out of range, or colliding -- the lowest free id in [1, kMaxRecords] is assigned.
     // Fails (store unchanged) if already full() or a record with this staticPublicKey already
     // exists -- call forget() first to replace one.
     bool add(TrustRecord record);

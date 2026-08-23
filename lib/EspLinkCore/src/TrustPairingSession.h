@@ -63,7 +63,10 @@ public:
 
     // Call once per main-loop tick. Moves to Cancelled if more than timeoutMs has elapsed since
     // the state last changed. Returns true if it just timed out on this call.
-    bool tick(uint32_t nowMs, uint32_t timeoutMs = 60000);
+    // The 120s default is the pairing window the design spec states (§4 "bounded, 120s countdown
+    // shown"); it has to cover a human walking to the second device and comparing two 6-digit
+    // codes on physical screens, which the earlier 60s default did not reliably allow for.
+    bool tick(uint32_t nowMs, uint32_t timeoutMs = 120000);
 
     const TrustDerivedKeys& derivedKeys() const { return derivedKeys_; }
     const TrustHelloMessage& peerHello() const { return peerHello_; }

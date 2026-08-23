@@ -34,14 +34,29 @@ bool TrustStore::add(TrustRecord record) {
     for (std::size_t i = 0; i < count_; ++i) {
         if (records_[i].routeId >= 1 && records_[i].routeId <= kMaxRecords) routeIdUsed[records_[i].routeId] = true;
     }
-    uint16_t assigned = 0;
-    for (uint16_t candidate = 1; candidate <= kMaxRecords; ++candidate) {
-        if (!routeIdUsed[candidate]) {
-            assigned = candidate;
-            break;
+
+    // Honor a routeId the record already carries -- a record reloaded from persistence, or one
+    // re-added by a rollback after a failed write. Reassigning on every load would silently
+    // permute which peer a given routeId points at (forget() is a swap-remove, so the persisted
+    // order changes after any revocation), turning a stale cached routeId on the host side from
+    // "drops" into "delivers to the wrong client".
+    //
+    // Falls back to the lowest free slot when the record has no routeId yet (0 -- the default for
+    // a freshly-paired device), or when the stored id is out of range or already taken by another
+    // record (a corrupt or hand-edited trust.json): duplicate route ids would make a routeId
+    // lookup ambiguous, so a conflicting stored id is deliberately not honored.
+    const bool canKeepStoredRouteId =
+        record.routeId >= 1 && record.routeId <= kMaxRecords && !routeIdUsed[record.routeId];
+    if (!canKeepStoredRouteId) {
+        uint16_t assigned = 0;
+        for (uint16_t candidate = 1; candidate <= kMaxRecords; ++candidate) {
+            if (!routeIdUsed[candidate]) {
+                assigned = candidate;
+                break;
+            }
         }
+        record.routeId = assigned;
     }
-    record.routeId = assigned;
 
     records_[count_++] = record;
     return true;
