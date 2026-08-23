@@ -4,7 +4,6 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
-#include <mbedtls/entropy.h>
 #include <mbedtls/md.h>
 
 #include <algorithm>
@@ -14,7 +13,6 @@
 namespace esplink {
 
 namespace {
-mbedtls_entropy_context g_entropy;
 mbedtls_ctr_drbg_context g_ctrDrbg;
 
 int espRandomCallback(void*, unsigned char* output, std::size_t length) {
@@ -70,7 +68,6 @@ bool hkdfSha256(const uint8_t* salt, std::size_t saltLength, const uint8_t* ikm,
 }  // namespace
 
 bool TrustCrypto::begin(std::string& error) {
-    mbedtls_entropy_init(&g_entropy);
     mbedtls_ctr_drbg_init(&g_ctrDrbg);
     const unsigned char customSeed[1] = {0};
     if (mbedtls_ctr_drbg_seed(&g_ctrDrbg, espRandomCallback, nullptr, customSeed, sizeof(customSeed)) != 0) {
@@ -201,6 +198,15 @@ bool TrustCrypto::deriveSessionKeys(const TrustPrivateKey& ourEphemeralPrivateKe
     mbedtls_ecp_group_free(&group);
     if (!ok) return false;
 
+    // Reject identical static public keys outright: this is a red-flag case (a reflection
+    // attempt or a cloned identity, not a normal pairing between two distinct devices), and the
+    // memcmp-based canonicalization below returns false for both sides on equality, which would
+    // otherwise make the two sides hash nonces in opposite order and silently derive different
+    // keys instead of failing closed.
+    if (std::memcmp(ourStaticPublicKey.data(), peerStaticPublicKey.data(), kTrustPublicKeyBytes) == 0) {
+        return false;
+    }
+
     // Canonicalize by comparing the two static public keys so both sides hash identically
     // regardless of which one is "ours" -- see the ITrustCrypto::deriveSessionKeys contract.
     const bool ourStaticIsSmaller =
@@ -261,11 +267,15 @@ bool TrustCrypto::selfTest(std::string& error) {
     }
 
     TrustNonce nonceA{}, nonceB{};
-    generateNonce(nonceA);
-    generateNonce(nonceB);
+    if (!generateNonce(nonceA) || !generateNonce(nonceB)) {
+        error = "nonce generation failed";
+        return false;
+    }
     TrustKeyPair ephemeralA, ephemeralB;
-    generateKeyPair(ephemeralA);
-    generateKeyPair(ephemeralB);
+    if (!generateKeyPair(ephemeralA) || !generateKeyPair(ephemeralB)) {
+        error = "ephemeral keygen failed";
+        return false;
+    }
     TrustDerivedKeys derivedA, derivedB;
     if (!deriveSessionKeys(ephemeralA.privateKey, ephemeralA.publicKey, alice.publicKey, nonceA, ephemeralB.publicKey,
                           bob.publicKey, nonceB, derivedA) ||
@@ -276,6 +286,10 @@ bool TrustCrypto::selfTest(std::string& error) {
     }
     if (derivedA.lmk != derivedB.lmk || derivedA.numericCode != derivedB.numericCode) {
         error = "deriveSessionKeys is not symmetric between the two sides";
+        return false;
+    }
+    if (derivedA.transcriptHash != derivedB.transcriptHash) {
+        error = "deriveSessionKeys transcriptHash is not symmetric between the two sides";
         return false;
     }
     return true;

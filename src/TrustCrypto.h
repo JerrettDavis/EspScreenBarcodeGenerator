@@ -11,10 +11,21 @@ namespace esplink {
 // derivation, built from mbedtls_md's HMAC-SHA256 per RFC 5869 (mbedTLS's own mbedtls_hkdf.h is
 // not guaranteed present on every ESP-IDF/mbedTLS version this project has built against, so this
 // implements HKDF directly from the always-present HMAC primitive instead of depending on it).
+//
+// Not thread-safe: every method (and the shared internal RNG state) must be called only from the
+// main Arduino loop task, never from an ESP-NOW receive callback or any other interrupt/task
+// context. This codebase's ESP-NOW endpoints already enforce this by only copying bytes in their
+// receive callbacks and doing all real processing (including any crypto) from loop().
 class TrustCrypto : public ITrustCrypto {
 public:
     // Seeds the internal CTR-DRBG from the ESP32 hardware RNG (esp_random()). Call once at
     // startup before any other method; returns false only if mbedTLS's entropy/DRBG setup fails.
+    //
+    // Must be called after Wi-Fi or BT has been enabled (e.g. after WiFi.mode(WIFI_STA)/
+    // esp_now_init()) for esp_random() to be a true hardware RNG rather than a weak pseudo-random
+    // source -- see ESP-IDF's RNG documentation. The one-time boot self-test in main.cpp is an
+    // exception: its keys are immediately discarded, so it seeds from whatever quality is
+    // available before Wi-Fi/BLE/ESP-NOW init runs.
     bool begin(std::string& error);
 
     bool generateKeyPair(TrustKeyPair& out) const override;
