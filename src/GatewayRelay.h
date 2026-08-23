@@ -92,7 +92,13 @@ public:
     // One MAC per trusted record, same order/index as fingerprintList(). Same contract as
     // EspNowEndpoint's (Task 6).
     std::vector<std::array<uint8_t, 6>> macList() const;
+    // Refuses to enable Secure Pairing when trust init failed at begin() -- same contract as
+    // EspNowEndpoint's (Task 6). Disabling is always allowed.
     bool setSecurePairingEnabled(bool value, std::string& error) {
+        if (value && !trustReady_) {
+            error = "trust store unavailable (trust init failed at startup)";
+            return false;
+        }
         return trustConfig_.setSecurePairingEnabled(value, error);
     }
     bool securePairingEnabled() const { return trustConfig_.securePairingEnabled(); }
@@ -173,6 +179,10 @@ private:
     esplink::TrustPairingSession trustPairing_{trustCrypto_};
     std::array<uint8_t, 6> pairingTargetMac_{};
     bool pairingIsInitiator_ = false;
+    // False if trust crypto/persistence failed to initialize in begin(). Relaying still runs
+    // (Secure Pairing is opt-in), but Secure Pairing cannot be enabled -- see
+    // setSecurePairingEnabled.
+    bool trustReady_ = false;
 
     std::array<RxDatagram, kEspNowRxQueueCapacity> rxQueue_{};
     volatile std::size_t rxHead_ = 0;  // next slot loop() reads

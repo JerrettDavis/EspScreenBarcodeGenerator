@@ -77,6 +77,12 @@ void setup() {
     } else {
         Serial.printf("{\"event\":\"espnow_error\",\"message\":\"%s\"}\n", espNowError.c_str());
     }
+    // Seed the Settings screen's Secure Pairing switch from what's actually persisted. Without
+    // this the switch renders Off after every reboot regardless of the stored value, so a device
+    // with Secure Pairing enabled would misreport its own security state -- and the first tap on
+    // the switch would be a silent no-op (it would compute !false = true and re-write the value
+    // it already had), taking two taps to actually turn enforcement off.
+    application.refreshSecurePairingEnabled(espNowEndpoint.securePairingEnabled());
     engine.setGatewayLinkStatusSource(&espNowEndpoint);
 
     std::string bleError;
@@ -98,6 +104,11 @@ void loop() {
             active = ActiveTransport::GatewayRelayMode;
             gatewayRelay.begin(espNowEndpoint.macAddress());  // takes over the ESP-NOW recv callback
             application.enterGatewayMode();
+            // Re-seed the Settings switch from GatewayRelay's own TrustConfigStore, which has
+            // just loaded the same persisted state. From here on the Trust/Secure Pairing UI is
+            // driven by gatewayRelay, not espNowEndpoint (see the mutually-exclusive branches in
+            // loop() below), so the displayed value has to follow that handover.
+            application.refreshSecurePairingEnabled(gatewayRelay.securePairingEnabled());
         } else if (legacyEndpoint.upgradeRequested()) {
             active = ActiveTransport::CobsV2;
         }

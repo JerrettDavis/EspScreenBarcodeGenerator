@@ -38,10 +38,15 @@ void GatewayRelay::begin(std::string deviceId) {
     // needs the radio initialized to be a true hardware RNG), which is guaranteed here since
     // GatewayRelay::begin() only ever runs after EspNowEndpoint::begin() has already brought up
     // Wi-Fi/esp_now (see the class comment above). A failure here is not treated as fatal to
-    // relay operation -- it just means Secure Pairing can't be enabled until it succeeds.
+    // relay operation -- it just means Secure Pairing can't be enabled until it succeeds (see
+    // setSecurePairingEnabled, which refuses while trustReady_ is false) -- but it IS reported,
+    // rather than silently discarded, so a broken trust store is visible in the serial log.
     std::string trustError;
-    trustCrypto_.begin(trustError);
-    trustConfig_.begin(trustCrypto_, trustError);
+    trustReady_ = trustCrypto_.begin(trustError) && trustConfig_.begin(trustCrypto_, trustError);
+    if (!trustReady_) {
+        Serial.printf("{\"event\":\"trust_init_failed\",\"transport\":\"gateway\",\"message\":\"%s\"}\n",
+                      trustError.c_str());
+    }
     esp_now_register_recv_cb(onGatewayEspNowReceive);
 }
 
@@ -475,7 +480,16 @@ void GatewayRelay::sendTrustFrameTo(const std::array<uint8_t, 6>& toMac, const c
 }
 
 bool GatewayRelay::ensureUnencryptedPeer(const std::array<uint8_t, 6>& mac) {
-    if (esp_now_is_peer_exist(mac.data())) return true;
+    // An existing entry is only reusable if it is actually unencrypted -- same contract and same
+    // rationale as EspNowEndpoint::ensureUnencryptedPeer (Task 6). A leftover encrypt=true entry
+    // would encrypt this handshake's plaintext hello under a stale LMK the peer can no longer
+    // decrypt, killing the handshake silently. Tear it down and re-add it unencrypted;
+    // finalizePairingCommit re-upgrades it once the attempt commits.
+    esp_now_peer_info_t existing{};
+    if (esp_now_get_peer(mac.data(), &existing) == ESP_OK) {
+        if (!existing.encrypt) return true;
+        esp_now_del_peer(mac.data());
+    }
     esp_now_peer_info_t peer{};
     memcpy(peer.peer_addr, mac.data(), 6);
     peer.channel = 0;  // 0 = use the current channel, already fixed by EspNowEndpoint::begin()
@@ -628,10 +642,22 @@ bool GatewayRelay::forgetByFingerprint(const std::string& fingerprint) {
         const TrustRecord* record = trustConfig_.store().at(i);
         TrustHash hash{};
         trustCrypto_.sha256(record->staticPublicKey.data(), record->staticPublicKey.size(), hash);
-        if (trustFingerprint(hash) == fingerprint) {
-            std::string error;
-            return trustConfig_.forgetRecord(record->staticPublicKey, error);
-        }
+        if (trustFingerprint(hash) != fingerprint) continue;
+
+        // Both copied before forgetRecord(): TrustStore::forget() is a swap-remove, so `record`
+        // either dangles or points at an unrelated peer's record the moment it returns.
+        const TrustPublicKey key = record->staticPublicKey;
+        const std::array<uint8_t, 6> mac = record->mac;
+
+        std::string error;
+        if (!trustConfig_.forgetRecord(key, error)) return false;
+
+        // Drop the ESP-NOW peer-table entry along with the record -- same contract and rationale
+        // as EspNowEndpoint::forgetByFingerprint (Task 6): a surviving encrypt=true entry with a
+        // revoked LMK would silently break the spec's "Forget forces re-pairing on next contact"
+        // guarantee. Failure is ignored; "no such peer" is a normal outcome here.
+        esp_now_del_peer(mac.data());
+        return true;
     }
     return false;
 }

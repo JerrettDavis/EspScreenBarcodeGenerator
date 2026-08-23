@@ -100,7 +100,15 @@ public:
     // screen (Task 8) zips the two together into TrustPeerRow so it can compare a discovered
     // peer's MAC against already-trusted MACs directly, without string-comparing fingerprints.
     std::vector<std::array<uint8_t, 6>> macList() const;
+    // Refuses to enable Secure Pairing when trust init failed at begin() -- enforcement reads the
+    // trust store on every inbound message, so turning it on without a working store would drop
+    // all traffic with no way to pair anything back. Disabling is always allowed, so a device
+    // that lost its trust store can still be returned to the open compatibility profile.
     bool setSecurePairingEnabled(bool value, std::string& error) {
+        if (value && !trustReady_) {
+            error = "trust store unavailable (trust init failed at startup)";
+            return false;
+        }
         return trustConfig_.setSecurePairingEnabled(value, error);
     }
     bool securePairingEnabled() const { return trustConfig_.securePairingEnabled(); }
@@ -178,6 +186,10 @@ private:
     TrustPairingSession trustPairing_{trustCrypto_};
     std::array<uint8_t, 6> pairingTargetMac_{};
     bool pairingIsInitiator_ = false;
+    // False if trust crypto/persistence failed to initialize in begin(). ESP-NOW still runs
+    // (Secure Pairing is opt-in), but Secure Pairing cannot be enabled -- see
+    // setSecurePairingEnabled.
+    bool trustReady_ = false;
 
     // Fixed-capacity ring buffer filled by the ESP-NOW receive callback, drained by loop().
     // A full queue drops the newest datagram rather than growing — bounded memory per

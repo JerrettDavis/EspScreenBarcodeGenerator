@@ -84,10 +84,18 @@ bool EspNowEndpoint::begin(std::string& error) {
 
     // Trust crypto must begin() only after Wi-Fi/ESP-NOW is up (see TrustCrypto.h -- esp_random()
     // needs the radio initialized to be a true hardware RNG), which is exactly where we are now.
+    //
+    // A failure here is deliberately NOT fatal to the endpoint, matching GatewayRelay::begin()'s
+    // stance. Secure Pairing is opt-in and off by default, so a LittleFS mount failure, a full
+    // NVS partition, or a failed identity write must not take down plain ESP-NOW on a device that
+    // never asked for pairing -- that would be a regression against the previously
+    // hardware-validated compatibility profile. It only means Secure Pairing cannot be turned on
+    // (see setSecurePairingEnabled, which refuses while trustReady_ is false).
     std::string trustError;
-    if (!trustCrypto_.begin(trustError) || !trustConfig_.begin(trustCrypto_, trustError)) {
-        error = "trust init failed: " + trustError;
-        return false;
+    trustReady_ = trustCrypto_.begin(trustError) && trustConfig_.begin(trustCrypto_, trustError);
+    if (!trustReady_) {
+        Serial.printf("{\"event\":\"trust_init_failed\",\"transport\":\"espnow\",\"message\":\"%s\"}\n",
+                      trustError.c_str());
     }
     return true;
 }
@@ -393,7 +401,18 @@ bool isPairingInFlight(TrustPairingState state) {
 }  // namespace
 
 bool EspNowEndpoint::ensureUnencryptedPeer(const std::array<uint8_t, 6>& mac) {
-    if (esp_now_is_peer_exist(mac.data())) return true;
+    // An existing entry is only reusable if it is actually unencrypted. A leftover encrypt=true
+    // entry -- left by an earlier successful pairing with this MAC whose peer has since rebooted,
+    // been forgotten on the far side, or otherwise lost the matching LMK -- would make the radio
+    // encrypt this handshake's plaintext hello under a key the peer can no longer decrypt, and
+    // the handshake would die silently with no error on either side. Tear such an entry down and
+    // re-add it unencrypted rather than reusing it, so a re-pair attempt actually gets through.
+    // (finalizePairingCommit re-upgrades it via upgradeToEncryptedPeer once the attempt commits.)
+    esp_now_peer_info_t existing{};
+    if (esp_now_get_peer(mac.data(), &existing) == ESP_OK) {
+        if (!existing.encrypt) return true;
+        esp_now_del_peer(mac.data());
+    }
     esp_now_peer_info_t peer{};
     memcpy(peer.peer_addr, mac.data(), 6);
     peer.channel = 0;  // 0 = use the current channel, already fixed by begin()
@@ -534,10 +553,24 @@ bool EspNowEndpoint::forgetByFingerprint(const std::string& fingerprint) {
         const TrustRecord* record = trustConfig_.store().at(i);
         TrustHash hash{};
         trustCrypto_.sha256(record->staticPublicKey.data(), record->staticPublicKey.size(), hash);
-        if (trustFingerprint(hash) == fingerprint) {
-            std::string error;
-            return trustConfig_.forgetRecord(record->staticPublicKey, error);
-        }
+        if (trustFingerprint(hash) != fingerprint) continue;
+
+        // Both copied before forgetRecord(): TrustStore::forget() is a swap-remove, so `record`
+        // either dangles or points at an unrelated peer's record the moment it returns.
+        const TrustPublicKey key = record->staticPublicKey;
+        const std::array<uint8_t, 6> mac = record->mac;
+
+        std::string error;
+        if (!trustConfig_.forgetRecord(key, error)) return false;
+
+        // The ESP-NOW peer-table entry outlives the trust record unless it's explicitly removed,
+        // still registered with encrypt=true and the now-revoked LMK. Leaving it behind breaks
+        // the spec's "Forget forces re-pairing on next contact" guarantee: the stale entry would
+        // encrypt a later re-pair's hello under a key the peer no longer has. The return value is
+        // ignored on purpose -- "no such peer" is a perfectly normal outcome here (e.g. the
+        // record was only ever loaded from disk and never had a live entry this boot).
+        esp_now_del_peer(mac.data());
+        return true;
     }
     return false;
 }

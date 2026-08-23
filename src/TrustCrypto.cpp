@@ -15,6 +15,14 @@ namespace esplink {
 namespace {
 mbedtls_ctr_drbg_context g_ctrDrbg;
 
+// "Is the shared DRBG seeded" lives at file scope alongside the context it describes, NOT as a
+// per-instance member. Several TrustCrypto instances share this one context (main.cpp's boot
+// self-test, EspNowEndpoint's, and in gateway mode GatewayRelay's). With a per-instance flag, a
+// later begin() would mbedtls_ctr_drbg_init() -- i.e. zero -- a context an earlier, still-live
+// instance believed was ready, and a failed re-seed would leave that instance calling
+// mbedtls_ctr_drbg_random() on zeroed state.
+bool g_ctrDrbgReady = false;
+
 int espRandomCallback(void*, unsigned char* output, std::size_t length) {
     esp_fill_random(output, length);
     return 0;
@@ -68,18 +76,34 @@ bool hkdfSha256(const uint8_t* salt, std::size_t saltLength, const uint8_t* ikm,
 }  // namespace
 
 bool TrustCrypto::begin(std::string& error) {
+    if (g_ctrDrbgReady) {
+        // The shared context is already seeded and in use by another instance, so it must never
+        // be re-init'd (that would zero it out from under whoever is holding it). Mix in fresh
+        // entropy instead: the first begin() of a boot is main.cpp's self-test, which runs before
+        // Wi-Fi is up and therefore seeds from esp_random()'s weak pre-radio output. The later
+        // calls -- EspNowEndpoint's, and GatewayRelay's in gateway mode -- happen after
+        // WiFi.mode(WIFI_STA)/esp_now_init(), so reseeding here is what actually gets true
+        // hardware entropy into the DRBG before any long-lived identity key is generated from it.
+        //
+        // A reseed failure is deliberately not fatal and not reported: the DRBG remains fully
+        // seeded and usable either way, just with older entropy, so there is no state in which a
+        // caller proceeds over an unusable context.
+        mbedtls_ctr_drbg_reseed(&g_ctrDrbg, nullptr, 0);
+        return true;
+    }
+
     mbedtls_ctr_drbg_init(&g_ctrDrbg);
     const unsigned char customSeed[1] = {0};
     if (mbedtls_ctr_drbg_seed(&g_ctrDrbg, espRandomCallback, nullptr, customSeed, sizeof(customSeed)) != 0) {
         error = "mbedtls_ctr_drbg_seed failed";
         return false;
     }
-    rngReady_ = true;
+    g_ctrDrbgReady = true;
     return true;
 }
 
 bool TrustCrypto::generateKeyPair(TrustKeyPair& out) const {
-    if (!rngReady_) return false;
+    if (!g_ctrDrbgReady) return false;
     mbedtls_ecp_group group;
     mbedtls_ecp_point point;
     mbedtls_mpi privateScalar;
@@ -104,13 +128,13 @@ bool TrustCrypto::generateKeyPair(TrustKeyPair& out) const {
 }
 
 bool TrustCrypto::generateNonce(TrustNonce& out) const {
-    if (!rngReady_) return false;
+    if (!g_ctrDrbgReady) return false;
     return mbedtls_ctr_drbg_random(&g_ctrDrbg, out.data(), out.size()) == 0;
 }
 
 bool TrustCrypto::sign(const TrustPrivateKey& privateKey, const uint8_t* message, std::size_t messageLength,
                       TrustSignature& outSignature) const {
-    if (!rngReady_) return false;
+    if (!g_ctrDrbgReady) return false;
     TrustHash digest{};
     if (!sha256(message, messageLength, digest)) return false;
 
@@ -171,7 +195,7 @@ bool TrustCrypto::deriveSessionKeys(const TrustPrivateKey& ourEphemeralPrivateKe
                                    const TrustPublicKey& peerEphemeralPublicKey,
                                    const TrustPublicKey& peerStaticPublicKey, const TrustNonce& peerNonce,
                                    TrustDerivedKeys& out) const {
-    if (!rngReady_) return false;
+    if (!g_ctrDrbgReady) return false;
 
     mbedtls_ecp_group group;
     mbedtls_ecp_point peerPoint, sharedPoint;
