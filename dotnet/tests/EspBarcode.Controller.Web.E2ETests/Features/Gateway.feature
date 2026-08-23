@@ -33,6 +33,7 @@ Feature: Gateway relay control
   Scenario: Trust card starts with no paired devices
     Given I put the first device into gateway mode
     When I open the Gateway page
+    And I click "Refresh Trust List" for that device
     Then the Gateway page shows no trusted devices for that device
 
   Scenario: Pairing a new device shows the on-device approval code
