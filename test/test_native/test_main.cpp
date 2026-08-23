@@ -8,6 +8,7 @@
 #include "UiRect.h"
 #include "FakeTrustCrypto.h"
 #include "TrustHandshake.h"
+#include "TrustStore.h"
 
 using namespace espbarcode;
 using uigeom::Rect;
@@ -228,6 +229,59 @@ void test_trust_hello_round_trip() {
                                  aliceDerived.transcriptHash.size());
 }
 
+void test_trust_store_add_find_forget() {
+    esplink::TrustStore store;
+    esplink::TrustRecord record;
+    record.staticPublicKey.fill(0x11);
+    record.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x01};
+    record.peerRole = esplink::TrustRole::Client;
+
+    TEST_ASSERT_TRUE(store.add(record));
+    TEST_ASSERT_EQUAL_UINT32(1, store.size());
+
+    const esplink::TrustRecord* byMac = store.findByMac(record.mac);
+    TEST_ASSERT_NOT_NULL(byMac);
+    TEST_ASSERT_EQUAL_UINT16(1, byMac->routeId);  // first assigned routeId is 1
+
+    const esplink::TrustRecord* byKey = store.findByStaticKey(record.staticPublicKey);
+    TEST_ASSERT_NOT_NULL(byKey);
+
+    // Duplicate static key is rejected.
+    esplink::TrustRecord duplicate = record;
+    duplicate.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0x02};
+    TEST_ASSERT_FALSE(store.add(duplicate));
+    TEST_ASSERT_EQUAL_UINT32(1, store.size());
+
+    TEST_ASSERT_TRUE(store.forget(record.staticPublicKey));
+    TEST_ASSERT_EQUAL_UINT32(0, store.size());
+    TEST_ASSERT_NULL(store.findByMac(record.mac));
+}
+
+void test_trust_store_enforces_cap() {
+    esplink::TrustStore store;
+    for (std::size_t i = 0; i < esplink::TrustStore::kMaxRecords; ++i) {
+        esplink::TrustRecord record;
+        record.staticPublicKey.fill(static_cast<uint8_t>(i + 1));
+        record.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, static_cast<uint8_t>(i)};
+        TEST_ASSERT_TRUE(store.add(record));
+    }
+    TEST_ASSERT_TRUE(store.full());
+
+    esplink::TrustRecord overflow;
+    overflow.staticPublicKey.fill(0xFF);
+    overflow.mac = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    TEST_ASSERT_FALSE(store.add(overflow));
+}
+
+void test_trust_fingerprint_format() {
+    esplink::TrustHash hash{};
+    hash[0] = 0xA3;
+    hash[1] = 0xF9;
+    hash[2] = 0x21;
+    hash[3] = 0xC4;
+    TEST_ASSERT_EQUAL_STRING("A3F9-21C4", esplink::trustFingerprint(hash).c_str());
+}
+
 void setUp() {}
 void tearDown() {}
 
@@ -244,5 +298,8 @@ int main(int, char**) {
     RUN_TEST(test_landscape_home_button_layout_has_no_overlaps_and_fits_screen);
     RUN_TEST(test_touch_pad_closes_gap_without_crossing_neighbor);
     RUN_TEST(test_trust_hello_round_trip);
+    RUN_TEST(test_trust_store_add_find_forget);
+    RUN_TEST(test_trust_store_enforces_cap);
+    RUN_TEST(test_trust_fingerprint_format);
     return UNITY_END();
 }
