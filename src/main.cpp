@@ -12,6 +12,7 @@
 #include "GatewayRelay.h"
 #include "SerialCobsEndpoint.h"
 #include "SerialLegacyEndpoint.h"
+#include "TrustCrypto.h"
 #include "WifiDirectTcpEndpoint.h"
 #include "app_config.h"
 
@@ -51,6 +52,19 @@ void setup() {
         Serial.printf("{\"event\":\"fatal\",\"message\":\"%s\"}\n", error.c_str());
         return;
     }
+
+    // One-time boot self-test for the mbedTLS-backed trust crypto module (Task 4): proves
+    // keygen/sign/verify/ECDH/HKDF actually work on this build before anything (Tasks 6-8)
+    // depends on it, so a broken mbedTLS integration shows up in the serial log immediately
+    // instead of silently failing on the first real pairing attempt.
+    esplink::TrustCrypto trustCrypto;
+    std::string trustCryptoError;
+    if (!trustCrypto.begin(trustCryptoError) || !trustCrypto.selfTest(trustCryptoError)) {
+        Serial.printf("{\"event\":\"trust_crypto_selftest_failed\",\"message\":\"%s\"}\n", trustCryptoError.c_str());
+    } else {
+        Serial.printf("{\"event\":\"trust_crypto_selftest_passed\"}\n");
+    }
+
     legacyEndpoint.begin();
 
     // ESP-NOW and BLE each run on their own radio/stack, independent of whichever serial
