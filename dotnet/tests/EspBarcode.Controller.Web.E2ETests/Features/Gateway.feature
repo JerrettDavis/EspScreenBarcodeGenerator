@@ -29,3 +29,22 @@ Feature: Gateway relay control
     When I open the Gateway page
     And I click "Refresh Peers" for that device
     Then the Gateway page shows no discovered peers for that device
+
+  Scenario: Trust card starts with no paired devices
+    Given I put the first device into gateway mode
+    When I open the Gateway page
+    Then the Gateway page shows no trusted devices for that device
+
+  Scenario: Pairing a new device shows the on-device approval code
+    Given I put the first device into gateway mode
+    When I open the Gateway page
+    And I click "Ping for Clients" for that device
+    And I click "Pair new device" for that device
+    Then the Gateway page shows a pairing code for that device
+
+  Scenario: Forgetting a trusted device removes it from the list
+    Given I put the first device into gateway mode with a trusted device "A3F9-21C4"
+    When I open the Gateway page
+    And I click "Refresh Trust List" for that device
+    And I click "Forget" for that device
+    Then the Gateway page shows no trusted devices for that device

@@ -24,11 +24,18 @@ public sealed class TestWorld : IAsyncDisposable
     }
 
     /// <summary>(Re)configures the fake Web Serial devices and (re)loads the app so the change applies.</summary>
-    public async Task ConfigureFakeDevicesAsync(int authorizedCount, int unauthorizedCount = 0)
+    public async Task ConfigureFakeDevicesAsync(
+        int authorizedCount, int unauthorizedCount = 0, IReadOnlyList<object>? trustedPeers = null)
     {
         var configs = new List<object>();
         for (var i = 0; i < authorizedCount; i++)
-            configs.Add(new { id = $"fake-{i + 1}", authorized = true, firmware = DefaultFirmware, device = "EspScreenBarcodeGenerator" });
+        {
+            configs.Add(new
+            {
+                id = $"fake-{i + 1}", authorized = true, firmware = DefaultFirmware, device = "EspScreenBarcodeGenerator",
+                trustedPeers = trustedPeers ?? Array.Empty<object>(),
+            });
+        }
         for (var i = 0; i < unauthorizedCount; i++)
             configs.Add(new { id = $"fake-unauth-{i + 1}", authorized = false, firmware = DefaultFirmware });
 

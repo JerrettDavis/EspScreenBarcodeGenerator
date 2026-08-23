@@ -70,4 +70,47 @@ public class GatewayStepDefinitions(TestWorld world)
     [Then("the Gateway page shows no discovered peers for that device")]
     public async Task ThenGatewayShowsNoPeers()
         => await Assertions.Expect(Page.Locator("[data-testid=gateway-peers]").First).ToContainTextAsync("No ESP-NOW peers seen yet");
+
+    [Given("I put the first device into gateway mode with a trusted device {string}")]
+    public async Task GivenFirstDeviceHasTrustedDevice(string fingerprint)
+    {
+        await world.ConfigureFakeDevicesAsync(authorizedCount: 2, trustedPeers:
+            [new { fingerprint, mac = "AA:BB:CC:DD:EE:02", route_id = 1, paired_at_ms = 0, label = "" }]);
+        // ConfigureFakeDevicesAsync reloads the app, which drops the connections the Background's
+        // "I reconnect known devices" step made -- reconnect again before entering gateway mode, or
+        // no [data-testid=device-card] exists yet for WhenIPutFirstDeviceIntoGatewayMode to target.
+        await Page.GoToSpaAsync("devices", "Devices");
+        await Page.Locator("[data-testid=reconnect-authorized]").ClickAsync();
+        await Task.Delay(300);
+        await WhenIPutFirstDeviceIntoGatewayMode();
+    }
+
+    [When("I click \"Pair new device\" for that device")]
+    public async Task WhenIClickPairNewDevice()
+    {
+        await Page.Locator("[data-testid=gateway-pair-new-device]").First.ClickAsync();
+        await Task.Delay(1200); // matches the poll timer's ~1s cadence (Task 10 Step 3)
+    }
+
+    [When("I click \"Refresh Trust List\" for that device")]
+    public async Task WhenIClickRefreshTrustList()
+    {
+        await Page.Locator("[data-testid=gateway-refresh-trust]").First.ClickAsync();
+        await Task.Delay(300);
+    }
+
+    [When("I click \"Forget\" for that device")]
+    public async Task WhenIClickForget()
+    {
+        await Page.Locator("[data-testid=gateway-trust-forget]").First.ClickAsync();
+        await Task.Delay(300);
+    }
+
+    [Then("the Gateway page shows no trusted devices for that device")]
+    public async Task ThenGatewayShowsNoTrustedDevices()
+        => await Assertions.Expect(Page.Locator("[data-testid=gateway-trust-empty]").First).ToBeVisibleAsync();
+
+    [Then("the Gateway page shows a pairing code for that device")]
+    public async Task ThenGatewayShowsPairingCode()
+        => await Assertions.Expect(Page.Locator("[data-testid=gateway-pairing-code]").First).ToBeVisibleAsync();
 }

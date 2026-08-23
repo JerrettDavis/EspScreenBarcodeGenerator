@@ -372,7 +372,35 @@
             let responseBody = {};
             let responseServiceId = envelope.serviceId ?? 0;
 
-            if (envelope.serviceId === 7) {
+            if (envelope.serviceId === 6) {
+                // ServiceId::Trust -- answered locally, mirroring GatewayRelay's
+                // handleTrustFromUsb (Task 7 Step 8).
+                this._trustedPeers = this._trustedPeers ?? (this.config?.trustedPeers ?? []).map((p) => ({ ...p }));
+                this._pairingState = this._pairingState ?? "idle";
+                if (name === "trust.controllers.list") {
+                    responseBody = { peers: this._trustedPeers };
+                } else if (name === "trust.pair.begin") {
+                    this._pairingState = "awaiting_approval";
+                    this._pairingFingerprint = "A3F9-21C4";
+                    this._pairingCode = 42913;
+                    responseBody = { ok: true };
+                } else if (name === "trust.pair.cancel") {
+                    this._pairingState = "idle";
+                    responseBody = { ok: true };
+                } else if (name === "trust.pair.status") {
+                    responseBody = { state: this._pairingState };
+                    if (this._pairingState === "awaiting_approval") {
+                        responseBody.fingerprint = this._pairingFingerprint;
+                        responseBody.numeric_code = this._pairingCode;
+                    }
+                } else if (name === "trust.controller.forget") {
+                    const before = this._trustedPeers.length;
+                    this._trustedPeers = this._trustedPeers.filter((p) => p.fingerprint !== body.fingerprint);
+                    responseBody = { ok: this._trustedPeers.length < before };
+                } else {
+                    isError = true;
+                }
+            } else if (envelope.serviceId === 7) {
                 // ServiceId::Gateway -- answered locally, mirroring GatewayRelay's
                 // handleGatewayServiceFromUsb (never forwarded to the "far side").
                 if (name === "gateway.peers.list") {
