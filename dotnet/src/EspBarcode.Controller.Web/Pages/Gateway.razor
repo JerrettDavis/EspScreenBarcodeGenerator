@@ -334,6 +334,12 @@ else
         {
             await device.GatewayLink.CancelPairingAsync();
         }
+        catch (Exception ex)
+        {
+            // Without this the exception escaped uncaught to the click handler instead of being
+            // surfaced, matching how every other action on this page reports failure.
+            _errors[device.Id] = ex.Message;
+        }
         finally
         {
             _pairingStatus.Remove(device.Id);
@@ -361,15 +367,29 @@ else
 
     private async Task PollPairingStatusAsync()
     {
-        foreach (var device in GatewayDevices.Where(d => _pairingStatus.ContainsKey(d.Id)))
+        // Polls every gateway-mode device, not just ones this operator started a pairing on. A
+        // client can initiate pairing against the gateway (the gateway then answers as responder),
+        // and previously that case never appeared in the browser at all -- exactly the "don't make
+        // the operator walk between two physical screens to compare codes" scenario the Trust card
+        // exists for.
+        foreach (var device in GatewayDevices)
         {
             if (device.GatewayLink is null) continue;
+            var wasTracking = _pairingStatus.ContainsKey(device.Id);
             try
             {
                 var status = await device.GatewayLink.PairingStatusAsync();
-                _pairingStatus[device.Id] = status;
-                if (status.State is "committed" or "cancelled")
+
+                if (status.InProgress)
                 {
+                    _pairingStatus[device.Id] = status;
+                }
+                else if (wasTracking)
+                {
+                    // Terminal (committed/cancelled) or back to idle, for an attempt we were
+                    // following. Stop following it: the firmware latches a terminal state until
+                    // the next attempt begins, so without dropping it here the committed branch
+                    // would re-fire -- and re-refresh the trust list -- on every single tick.
                     _pairingStatus.Remove(device.Id);
                     if (status.State == "committed") await RefreshTrustedPeersAsync(device);
                 }
