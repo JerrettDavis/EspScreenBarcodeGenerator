@@ -67,10 +67,16 @@ else
             <div class="esb-card" style="margin:0 0 12px; padding:10px;" data-testid="gateway-trust">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                     <span class="esb-muted" style="font-weight:600;">Trusted devices</span>
-                    <button class="esb-btn esb-btn-sm" type="button" disabled="@_busy" data-testid="gateway-pair-new-device"
-                            @onclick="@(() => BeginPairingAsync(device))">
-                        Pair new device
-                    </button>
+                    <div class="esb-btn-row" style="margin:0;">
+                        <button class="esb-btn esb-btn-sm" type="button" disabled="@_busy" data-testid="gateway-refresh-trust"
+                                @onclick="@(() => RefreshTrustedPeersAsync(device))">
+                            Refresh Trust List
+                        </button>
+                        <button class="esb-btn esb-btn-sm" type="button" disabled="@_busy" data-testid="gateway-pair-new-device"
+                                @onclick="@(() => BeginPairingAsync(device))">
+                            Pair new device
+                        </button>
+                    </div>
                 </div>
 
                 @if (_pairingStatus.TryGetValue(device.Id, out var pairing) && pairing.InProgress)
@@ -268,7 +274,20 @@ else
     private async Task RefreshTrustedPeersAsync(DeviceConnection device)
     {
         if (device.GatewayLink is null) return;
-        _trustedPeers[device.Id] = await device.GatewayLink.ListTrustedPeersAsync();
+        _busy = true;
+        _errors.Remove(device.Id);
+        try
+        {
+            _trustedPeers[device.Id] = await device.GatewayLink.ListTrustedPeersAsync();
+        }
+        catch (Exception ex)
+        {
+            _errors[device.Id] = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private async Task BeginPairingAsync(DeviceConnection device)
