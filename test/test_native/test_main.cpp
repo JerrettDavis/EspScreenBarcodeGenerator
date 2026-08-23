@@ -6,6 +6,8 @@
 #include "EspBarcodeCore.h"
 #include "RandomPayload.h"
 #include "UiRect.h"
+#include "FakeTrustCrypto.h"
+#include "TrustHandshake.h"
 
 using namespace espbarcode;
 using uigeom::Rect;
@@ -188,6 +190,44 @@ void test_touch_pad_closes_gap_without_crossing_neighbor() {
     TEST_ASSERT_TRUE(kSave.contains(240, 57, pad));
 }
 
+void test_trust_hello_round_trip() {
+    esplink::FakeTrustCrypto crypto;
+    esplink::TrustKeyPair aliceIdentity, bobIdentity;
+    TEST_ASSERT_TRUE(crypto.generateKeyPair(aliceIdentity));
+    TEST_ASSERT_TRUE(crypto.generateKeyPair(bobIdentity));
+
+    esplink::TrustKeyPair aliceEphemeral, bobEphemeral;
+    esplink::TrustNonce aliceNonce{}, bobNonce{};
+    esplink::TrustHelloMessage aliceHello, bobHello;
+    TEST_ASSERT_TRUE(esplink::buildTrustHello(crypto, aliceIdentity, aliceEphemeral, aliceNonce, aliceHello));
+    TEST_ASSERT_TRUE(esplink::buildTrustHello(crypto, bobIdentity, bobEphemeral, bobNonce, bobHello));
+
+    // Self-consistency (first-time pairing): each side accepts the other's own claimed key.
+    TEST_ASSERT_TRUE(esplink::verifyTrustHello(crypto, aliceHello.staticPublicKey, aliceHello));
+    TEST_ASSERT_TRUE(esplink::verifyTrustHello(crypto, bobHello.staticPublicKey, bobHello));
+
+    // A tampered signature must not verify.
+    esplink::TrustHelloMessage tampered = aliceHello;
+    tampered.signature[0] ^= 0xFF;
+    TEST_ASSERT_FALSE(esplink::verifyTrustHello(crypto, tampered.staticPublicKey, tampered));
+
+    // Claiming a static key that doesn't match the embedded one is rejected outright.
+    esplink::TrustHelloMessage spoofed = aliceHello;
+    TEST_ASSERT_FALSE(esplink::verifyTrustHello(crypto, bobHello.staticPublicKey, spoofed));
+
+    esplink::TrustDerivedKeys aliceDerived, bobDerived;
+    TEST_ASSERT_TRUE(
+        esplink::deriveFromHellos(crypto, aliceIdentity, aliceEphemeral, aliceNonce, bobHello, aliceDerived));
+    TEST_ASSERT_TRUE(
+        esplink::deriveFromHellos(crypto, bobIdentity, bobEphemeral, bobNonce, aliceHello, bobDerived));
+
+    // Both sides must land on identical derived output despite opposite call order.
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(aliceDerived.lmk.data(), bobDerived.lmk.data(), aliceDerived.lmk.size());
+    TEST_ASSERT_EQUAL_UINT32(aliceDerived.numericCode, bobDerived.numericCode);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(aliceDerived.transcriptHash.data(), bobDerived.transcriptHash.data(),
+                                 aliceDerived.transcriptHash.size());
+}
+
 void setUp() {}
 void tearDown() {}
 
@@ -203,5 +243,6 @@ int main(int, char**) {
     RUN_TEST(test_home_button_layout_has_no_overlaps_and_fits_screen);
     RUN_TEST(test_landscape_home_button_layout_has_no_overlaps_and_fits_screen);
     RUN_TEST(test_touch_pad_closes_gap_without_crossing_neighbor);
+    RUN_TEST(test_trust_hello_round_trip);
     return UNITY_END();
 }
