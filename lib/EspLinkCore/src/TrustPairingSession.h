@@ -36,8 +36,8 @@ public:
     // Handles an incoming trust.pair.begin. If Idle, this makes us the responder (returns our own
     // hello to send back via outReplyMessage, moves to AwaitingApproval). If AwaitingPeerHello,
     // this completes our own initiator exchange (outReplyMessage untouched -- nothing new to
-    // send). Returns false (state -> Cancelled) if the peer's self-signature doesn't verify, or
-    // if an attempt with a different peer is already past Idle.
+    // send). Returns false and calls reset() (state -> Idle) if the peer's self-signature doesn't
+    // verify. Returns false with state unchanged if an attempt is already past Idle/AwaitingPeerHello.
     bool onPeerHello(const TrustHelloMessage& peerHello, const TrustKeyPair& ourIdentity, uint32_t nowMs,
                      TrustHelloMessage& outReplyMessage, bool& outHasReply);
 
@@ -53,7 +53,7 @@ public:
     // transcriptHash, verified against the peer's static key captured from their hello. Valid in
     // AwaitingApproval (peer confirmed before us -- remembered so our own confirmLocally() commits
     // right away) or AwaitingPeerConfirm (we confirmed first -- this commits now). Returns false
-    // (state -> Cancelled) on a bad signature.
+    // and calls reset() (state -> Idle) on a bad signature.
     bool onPeerConfirm(const TrustSignature& peerConfirmSignature, uint32_t nowMs);
 
     // The human tapped Deny, or the caller is cancelling for another reason. Always succeeds.
