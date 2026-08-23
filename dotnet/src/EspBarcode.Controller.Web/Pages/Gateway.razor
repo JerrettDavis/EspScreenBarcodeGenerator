@@ -64,6 +64,57 @@ else
                 }
             </div>
 
+            <div class="esb-card" style="margin:0 0 12px; padding:10px;" data-testid="gateway-trust">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span class="esb-muted" style="font-weight:600;">Trusted devices</span>
+                    <button class="esb-btn esb-btn-sm" type="button" disabled="@_busy" data-testid="gateway-pair-new-device"
+                            @onclick="@(() => BeginPairingAsync(device))">
+                        Pair new device
+                    </button>
+                </div>
+
+                @if (_pairingStatus.TryGetValue(device.Id, out var pairing) && pairing.InProgress)
+                {
+                    <div data-testid="gateway-pairing-status" style="padding:6px 0; font-size:0.85em;">
+                        @if (pairing.AwaitingApproval && !string.IsNullOrEmpty(pairing.Fingerprint))
+                        {
+                            <p style="margin:0;">
+                                Peer <strong>@pairing.Fingerprint</strong> — code
+                                <strong data-testid="gateway-pairing-code">@pairing.NumericCode?.ToString("D6")</strong>
+                            </p>
+                            <p class="esb-faint" style="margin:0;">Confirm this matches the code on both device screens, then tap Confirm on both.</p>
+                        }
+                        else
+                        {
+                            <p class="esb-faint" style="margin:0;">Waiting for the peer...</p>
+                        }
+                        <button class="esb-btn esb-btn-sm" type="button" data-testid="gateway-cancel-pairing"
+                                @onclick="@(() => CancelPairingAsync(device))">
+                            Cancel
+                        </button>
+                    </div>
+                }
+
+                @if (!_trustedPeers.TryGetValue(device.Id, out var trusted) || trusted.Count == 0)
+                {
+                    <p class="esb-faint" style="margin:0;" data-testid="gateway-trust-empty">No paired devices yet.</p>
+                }
+                else
+                {
+                    @foreach (var peer in trusted)
+                    {
+                        <div style="display:flex; justify-content:space-between; gap:8px; padding:3px 0; font-size:0.85em;" data-testid="gateway-trust-row">
+                            <span>@peer.Fingerprint</span>
+                            <span class="esb-faint">@peer.Mac (route @peer.RouteId)</span>
+                            <button class="esb-btn esb-btn-sm" type="button" disabled="@_busy" data-testid="gateway-trust-forget"
+                                    @onclick="@(() => ForgetPeerAsync(device, peer.Fingerprint))">
+                                Forget
+                            </button>
+                        </div>
+                    }
+                }
+            </div>
+
             <div class="esb-form-row">
                 <div class="esb-field">
                     <label>Type</label>
@@ -107,11 +158,19 @@ else
     private readonly Dictionary<string, GenerateResult> _results = new();
     private readonly Dictionary<string, string> _errors = new();
     private readonly Dictionary<string, IReadOnlyList<GatewayPeer>> _peers = new();
+    private readonly Dictionary<string, IReadOnlyList<TrustedPeer>> _trustedPeers = new();
+    private readonly Dictionary<string, TrustPairingStatus> _pairingStatus = new();
+    private System.Threading.Timer? _pairingPollTimer;
 
     private List<DeviceConnection> GatewayDevices =>
         Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay).ToList();
 
-    protected override void OnInitialized() => Devices.Changed += OnChanged;
+    protected override void OnInitialized()
+    {
+        Devices.Changed += OnChanged;
+        _pairingPollTimer = new System.Threading.Timer(_ => _ = PollPairingStatusAsync(), null,
+            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
 
     private async void OnChanged() => await InvokeAsync(StateHasChanged);
 
@@ -206,5 +265,107 @@ else
         }
     }
 
-    public void Dispose() => Devices.Changed -= OnChanged;
+    private async Task RefreshTrustedPeersAsync(DeviceConnection device)
+    {
+        if (device.GatewayLink is null) return;
+        _trustedPeers[device.Id] = await device.GatewayLink.ListTrustedPeersAsync();
+    }
+
+    private async Task BeginPairingAsync(DeviceConnection device)
+    {
+        if (device.GatewayLink is null) return;
+        _busy = true;
+        _errors.Remove(device.Id);
+        try
+        {
+            // Reuses the MAC of the first discovered-but-not-yet-trusted peer from the existing
+            // peers list (_peers, populated by RefreshPeersAsync/PingNowAsync above) rather than
+            // introducing a second discovery source.
+            var alreadyTrusted = (_trustedPeers.TryGetValue(device.Id, out var trusted) ? trusted : [])
+                .Select(p => p.Mac).ToHashSet();
+            var candidate = (_peers.TryGetValue(device.Id, out var discovered) ? discovered : [])
+                .FirstOrDefault(p => !alreadyTrusted.Contains(p.Mac));
+            if (candidate is null)
+            {
+                _errors[device.Id] = "No undiscovered peer to pair -- click \"Ping for Clients\" first.";
+                return;
+            }
+            var ok = await device.GatewayLink.BeginPairingAsync(candidate.Mac);
+            if (!ok)
+            {
+                _errors[device.Id] = "Gateway declined to start pairing (already pairing, peer table full, or crypto init failed).";
+                return;
+            }
+            _pairingStatus[device.Id] = new TrustPairingStatus("discovering", null, null);
+        }
+        catch (Exception ex)
+        {
+            _errors[device.Id] = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CancelPairingAsync(DeviceConnection device)
+    {
+        if (device.GatewayLink is null) return;
+        try
+        {
+            await device.GatewayLink.CancelPairingAsync();
+        }
+        finally
+        {
+            _pairingStatus.Remove(device.Id);
+        }
+    }
+
+    private async Task ForgetPeerAsync(DeviceConnection device, string fingerprint)
+    {
+        if (device.GatewayLink is null) return;
+        _busy = true;
+        try
+        {
+            await device.GatewayLink.ForgetPeerAsync(fingerprint);
+            await RefreshTrustedPeersAsync(device);
+        }
+        catch (Exception ex)
+        {
+            _errors[device.Id] = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PollPairingStatusAsync()
+    {
+        foreach (var device in GatewayDevices.Where(d => _pairingStatus.ContainsKey(d.Id)))
+        {
+            if (device.GatewayLink is null) continue;
+            try
+            {
+                var status = await device.GatewayLink.PairingStatusAsync();
+                _pairingStatus[device.Id] = status;
+                if (status.State is "committed" or "cancelled")
+                {
+                    _pairingStatus.Remove(device.Id);
+                    if (status.State == "committed") await RefreshTrustedPeersAsync(device);
+                }
+            }
+            catch
+            {
+                // Transient poll failure -- next tick tries again; don't surface as a page error.
+            }
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Devices.Changed -= OnChanged;
+        _pairingPollTimer?.Dispose();
+    }
 }
