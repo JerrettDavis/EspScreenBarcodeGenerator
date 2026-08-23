@@ -583,13 +583,22 @@ void EspNowEndpoint::handleTrustMessage(const uint8_t* fromMac, JsonObjectConst 
         const bool wasAwaitingOurOwnHello = pairingIsInitiator_ && pairingTargetMac_ == mac &&
                                             trustPairing_.state() == TrustPairingState::AwaitingPeerHello;
 
+        // Captured *before* calling onPeerHello: it can return false for two different reasons,
+        // and only one of them means an attempt was actually abandoned. From Idle (about to
+        // become a fresh responder) or AwaitingPeerHello (we're the initiator awaiting exactly
+        // this peer's reply -- guaranteed above), a signature failure makes onPeerHello reset()
+        // internally, so evicting the peer entry below is correct. From any other state, a
+        // *different* attempt is already in flight and onPeerHello's fallback `return false`
+        // deliberately leaves that other attempt's state untouched (see TrustPairingSession's
+        // contract) -- evicting in that case would delete a real, still-needed peer entry for
+        // whichever peer we're actually mid-handshake with (see round-2 review finding).
+        const bool preCallStateResetsOnFailure = trustPairing_.state() == TrustPairingState::Idle ||
+                                                  trustPairing_.state() == TrustPairingState::AwaitingPeerHello;
+
         TrustHelloMessage reply;
         bool hasReply = false;
         if (!trustPairing_.onPeerHello(peerHello, trustConfig_.identity(), millis(), reply, hasReply)) {
-            // A rejected (bad self-signature) hello, or an attempt already past Idle/
-            // AwaitingPeerHello -- if we were the initiator and this was the peer's (invalid)
-            // reply, evict the peer entry beginPairing() registered for this attempt.
-            evictUntrustedPeer(mac);
+            if (preCallStateResetsOnFailure) evictUntrustedPeer(mac);
             return;
         }
 
@@ -630,7 +639,16 @@ void EspNowEndpoint::handleTrustMessage(const uint8_t* fromMac, JsonObjectConst 
         }
         TrustSignature signature{};
         std::memcpy(signature.data(), signatureBytes.data(), signature.size());
-        if (!trustPairing_.onPeerConfirm(signature, millis())) return;
+        if (!trustPairing_.onPeerConfirm(signature, millis())) {
+            // Bad signature: onPeerConfirm() already reset() internally (state -> Idle). `mac`
+            // is confirmed equal to pairingTargetMac_ by the guard above, so this attempt's own
+            // peer entry -- not some unrelated one -- is what needs evicting here. Without this,
+            // an attacker could register a peer via a self-consistent junk hello, then force a
+            // reset-without-eviction by sending garbage as trust.pair.confirm, and repeat with
+            // new MACs to exhaust ESP-NOW's small peer-table ceiling.
+            evictUntrustedPeer(mac);
+            return;
+        }
         if (trustPairing_.state() == TrustPairingState::Committed) {
             finalizePairingCommit(mac);
         }
