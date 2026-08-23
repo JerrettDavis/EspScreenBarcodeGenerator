@@ -124,6 +124,15 @@ void EspNowEndpoint::loop() {
         processDatagram(datagram);
     }
     maybeSendGatewayProbe();
+
+    // An in-progress pairing attempt that nobody ever confirmed/denied (e.g. a human never
+    // returned to the Trust screen, or a peer went silent mid-handshake) must not block all
+    // future pairing forever -- tick() moves it to Cancelled once it's been stuck too long, and
+    // whatever temporary peer-table entry belonged to that attempt is evicted here rather than
+    // left to exhaust ESP-NOW's small peer-table ceiling.
+    if (trustPairing_.tick(millis())) {
+        evictUntrustedPeer(pairingTargetMac_);
+    }
 }
 
 void EspNowEndpoint::processDatagram(const RxDatagram& datagram) {
@@ -368,6 +377,19 @@ void encodeHelloJson(const TrustHelloMessage& hello, JsonObject body) {
     body["nonce"] = bytesToBase64(std::vector<uint8_t>(hello.nonce.begin(), hello.nonce.end()));
     body["signature"] = bytesToBase64(std::vector<uint8_t>(hello.signature.begin(), hello.signature.end()));
 }
+
+// A terminal result (Committed/Cancelled) lingers in trustPairing_ so pairingStatus() can report
+// it to whatever's polling -- see beginPairing()/handleTrustMessage's "trust.pair.begin" branch,
+// which reset() a stale terminal result at the start of the *next* attempt rather than the
+// moment it's reached.
+bool isTerminalPairingState(TrustPairingState state) {
+    return state == TrustPairingState::Committed || state == TrustPairingState::Cancelled;
+}
+
+bool isPairingInFlight(TrustPairingState state) {
+    return state == TrustPairingState::AwaitingPeerHello || state == TrustPairingState::AwaitingApproval ||
+           state == TrustPairingState::AwaitingPeerConfirm;
+}
 }  // namespace
 
 bool EspNowEndpoint::ensureUnencryptedPeer(const std::array<uint8_t, 6>& mac) {
@@ -392,7 +414,45 @@ bool EspNowEndpoint::upgradeToEncryptedPeer(const std::array<uint8_t, 6>& mac,
     return esp_now_add_peer(&peer) == ESP_OK;
 }
 
+void EspNowEndpoint::evictUntrustedPeer(const std::array<uint8_t, 6>& mac) {
+    if (trustConfig_.store().findByMac(mac) == nullptr) {
+        esp_now_del_peer(mac.data());
+    }
+    // else: this mac has an established trust record -- some *other* successful pairing (past or
+    // present) put this peer-table entry there, so a failed/cancelled/timed-out attempt touching
+    // the same mac must not tear down a working encrypted connection.
+}
+
+void EspNowEndpoint::finalizePairingCommit(const std::array<uint8_t, 6>& mac) {
+    const bool alreadyTrusted = trustConfig_.store().findByMac(mac) != nullptr;
+    TrustRecord record;
+    record.staticPublicKey = trustPairing_.peerHello().staticPublicKey;
+    record.mac = mac;
+    record.peerRole = TrustRole::Gateway;  // EspNowEndpoint always pairs with a gateway
+    record.pairedAtMs = millis();
+    std::string persistError;
+    // A reconnect's record already exists; addRecord's "already paired" failure is expected and
+    // harmless there -- the record is already persisted, only the session key needed refreshing.
+    const bool persisted = trustConfig_.addRecord(record, persistError) || alreadyTrusted;
+    if (!persisted) {
+        // Trust store full, or the LittleFS write failed: do NOT proceed as if this had
+        // succeeded -- nothing gets encrypted, and the failure must be visible to whatever polls
+        // pairingStatus() rather than silently pretending to have committed.
+        bool shouldSend = false;
+        trustPairing_.cancel(shouldSend);
+        if (shouldSend) sendTrustCancel(mac);
+        evictUntrustedPeer(mac);
+        return;
+    }
+    upgradeToEncryptedPeer(mac, trustPairing_.derivedKeys().lmk);
+    // Deliberately not reset() here -- state() stays Committed so pairingStatus() can report
+    // success; the next beginPairing()/incoming trust.pair.begin resets it (see there).
+}
+
 bool EspNowEndpoint::beginPairing(const std::array<uint8_t, 6>& targetMac) {
+    // A stale terminal result from a *previous* attempt must not block a new one -- see
+    // pairingStatus()'s comment on why Committed/Cancelled linger instead of auto-resetting.
+    if (isTerminalPairingState(trustPairing_.state())) trustPairing_.reset();
     if (trustPairing_.state() != TrustPairingState::Idle) return false;
     if (!ensureUnencryptedPeer(targetMac)) return false;
 
@@ -409,16 +469,7 @@ void EspNowEndpoint::confirmPairing() {
     if (!trustPairing_.confirmLocally(millis(), signature)) return;
     sendTrustConfirm(pairingTargetMac_, signature);
     if (trustPairing_.state() == TrustPairingState::Committed) {
-        TrustRecord record;
-        record.staticPublicKey = trustPairing_.peerHello().staticPublicKey;
-        record.mac = pairingTargetMac_;
-        record.peerRole = TrustRole::Gateway;  // EspNowEndpoint always pairs with a gateway
-        record.pairedAtMs = millis();
-        std::string persistError;
-        trustConfig_.addRecord(record, persistError);  // a reconnect's record already exists;
-                                                        // addRecord no-ops (fails harmlessly)
-        upgradeToEncryptedPeer(pairingTargetMac_, trustPairing_.derivedKeys().lmk);
-        trustPairing_.reset();
+        finalizePairingCommit(pairingTargetMac_);
     }
 }
 
@@ -426,8 +477,9 @@ void EspNowEndpoint::denyPairing() {
     bool shouldSend = false;
     trustPairing_.cancel(shouldSend);
     if (shouldSend) sendTrustCancel(pairingTargetMac_);
-    esp_now_del_peer(pairingTargetMac_.data());
-    trustPairing_.reset();
+    evictUntrustedPeer(pairingTargetMac_);
+    // Deliberately not reset() here -- state() stays Cancelled so pairingStatus() can report it;
+    // the next beginPairing()/incoming trust.pair.begin resets it (see there).
 }
 
 EspNowEndpoint::TrustPairingUiStatus EspNowEndpoint::pairingStatus() const {
@@ -500,6 +552,18 @@ void EspNowEndpoint::handleTrustMessage(const uint8_t* fromMac, JsonObjectConst 
         TrustHelloMessage peerHello;
         if (!decodeHelloJson(body, peerHello)) return;
 
+        // A stale terminal result from a *previous* attempt must not block a fresh one -- see
+        // pairingStatus()'s comment on why Committed/Cancelled linger instead of auto-resetting.
+        if (isTerminalPairingState(trustPairing_.state())) trustPairing_.reset();
+
+        // If we're already mid-handshake as the initiator, only the peer we started with may
+        // complete it -- trustPairing_.onPeerHello()'s AwaitingPeerHello branch unconditionally
+        // accepts whatever hello it's given, so without this check a third MAC could hijack (and
+        // destroy) our own in-flight attempt just by sending an unrelated hello of its own.
+        if (trustPairing_.state() == TrustPairingState::AwaitingPeerHello && pairingTargetMac_ != mac) {
+            return;
+        }
+
         // A peer we already trust: verify the incoming hello against the *pinned* key on file,
         // not just its own self-consistency signature -- a MAC-spoofing attacker presenting a
         // different static key must be rejected outright rather than "verified against itself"
@@ -508,7 +572,6 @@ void EspNowEndpoint::handleTrustMessage(const uint8_t* fromMac, JsonObjectConst 
         if (existing != nullptr && !verifyTrustHello(trustCrypto_, existing->staticPublicKey, peerHello)) {
             return;
         }
-        if (!ensureUnencryptedPeer(mac)) return;
 
         // Was this device already mid-handshake as the initiator, specifically awaiting this
         // peer's reply? If so, this hello must be folded into *that* attempt --
@@ -522,7 +585,26 @@ void EspNowEndpoint::handleTrustMessage(const uint8_t* fromMac, JsonObjectConst 
 
         TrustHelloMessage reply;
         bool hasReply = false;
-        if (!trustPairing_.onPeerHello(peerHello, trustConfig_.identity(), millis(), reply, hasReply)) return;
+        if (!trustPairing_.onPeerHello(peerHello, trustConfig_.identity(), millis(), reply, hasReply)) {
+            // A rejected (bad self-signature) hello, or an attempt already past Idle/
+            // AwaitingPeerHello -- if we were the initiator and this was the peer's (invalid)
+            // reply, evict the peer entry beginPairing() registered for this attempt.
+            evictUntrustedPeer(mac);
+            return;
+        }
+
+        // Only now -- after onPeerHello's self-consistency signature check has actually passed
+        // -- do we register a peer-table entry for this sender. Registering unconditionally for
+        // every incoming trust.pair.begin, before validating it, would let a flood of junk
+        // hellos from distinct MACs exhaust ESP-NOW's small hardware peer-table ceiling; since
+        // only one attempt can be in flight at a time (trustPairing_ is a single instance), at
+        // most one such entry is ever at risk, and it's evicted on timeout/failure above.
+        if (!ensureUnencryptedPeer(mac)) {
+            bool ignoredShouldSend = false;
+            trustPairing_.cancel(ignoredShouldSend);  // can't reply without a peer-table slot
+            return;
+        }
+
         if (!wasAwaitingOurOwnHello) {
             // We're the responder to this attempt (fresh or reconnect) -- remember who, for
             // confirmPairing()/denyPairing() and the auto-confirm below.
@@ -550,25 +632,21 @@ void EspNowEndpoint::handleTrustMessage(const uint8_t* fromMac, JsonObjectConst 
         std::memcpy(signature.data(), signatureBytes.data(), signature.size());
         if (!trustPairing_.onPeerConfirm(signature, millis())) return;
         if (trustPairing_.state() == TrustPairingState::Committed) {
-            TrustRecord record;
-            record.staticPublicKey = trustPairing_.peerHello().staticPublicKey;
-            record.mac = mac;
-            record.peerRole = TrustRole::Gateway;
-            record.pairedAtMs = millis();
-            std::string persistError;
-            trustConfig_.addRecord(record, persistError);
-            upgradeToEncryptedPeer(mac, trustPairing_.derivedKeys().lmk);
-            trustPairing_.reset();
+            finalizePairingCommit(mac);
         }
         return;
     }
 
     if (std::strcmp(name, "trust.pair.cancel") == 0) {
-        // Only the peer we're actually mid-handshake with may cancel it -- otherwise any nearby
-        // sender could tear down an unrelated in-progress pairing attempt with a stray message.
-        if (mac == pairingTargetMac_ && trustPairing_.state() != TrustPairingState::Idle) {
-            esp_now_del_peer(mac.data());
-            trustPairing_.reset();
+        // Only the peer we're actually mid-handshake with may cancel it, and only while an
+        // attempt is genuinely in flight -- otherwise any nearby sender could tear down an
+        // unrelated in-progress pairing attempt (or a just-completed one still waiting for
+        // pairingStatus() to report it) with a stray message.
+        if (mac == pairingTargetMac_ && isPairingInFlight(trustPairing_.state())) {
+            bool ignoredShouldSend = false;
+            trustPairing_.cancel(ignoredShouldSend);  // -> Cancelled; we're reacting to their
+                                                       // cancel, so never send one back
+            evictUntrustedPeer(mac);
         }
     }
 }

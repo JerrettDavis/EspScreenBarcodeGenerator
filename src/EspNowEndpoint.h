@@ -133,6 +133,18 @@ private:
     void sendTrustCancel(const std::array<uint8_t, 6>& toMac);
     bool ensureUnencryptedPeer(const std::array<uint8_t, 6>& mac);
     bool upgradeToEncryptedPeer(const std::array<uint8_t, 6>& mac, const std::array<uint8_t, kTrustLmkBytes>& lmk);
+    // Deletes the ESP-NOW peer-table entry for `mac` unless it belongs to an already-established
+    // trust record -- some *other*, successful pairing put it there, and it must survive this
+    // attempt's failure/cancellation/timeout undisturbed. Used by every path that ends a pairing
+    // attempt without a successful commit (timeout, deny, incoming cancel, a rejected hello, a
+    // failed peer registration, a failed persist).
+    void evictUntrustedPeer(const std::array<uint8_t, 6>& mac);
+    // Called once trustPairing_ has reached Committed (from confirmPairing() or an incoming
+    // trust.pair.confirm) to persist the record and switch the peer over to encrypted comms. If
+    // persistence fails, this is treated as a failed attempt rather than silently proceeding as
+    // if it had succeeded: nothing gets encrypted, the temporary peer entry is evicted, and the
+    // session moves to Cancelled instead of staying Committed.
+    void finalizePairingCommit(const std::array<uint8_t, 6>& mac);
 
     static const char* mapV2Name(const std::string& name);
 
