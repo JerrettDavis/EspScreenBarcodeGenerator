@@ -8,6 +8,7 @@
 #include "UiRect.h"
 #include "FakeTrustCrypto.h"
 #include "TrustHandshake.h"
+#include "TrustPairingSession.h"
 #include "TrustStore.h"
 
 using namespace espbarcode;
@@ -282,6 +283,115 @@ void test_trust_fingerprint_format() {
     TEST_ASSERT_EQUAL_STRING("A3F9-21C4", esplink::trustFingerprint(hash).c_str());
 }
 
+void test_trust_pairing_happy_path_both_confirm_first() {
+    esplink::FakeTrustCrypto crypto;
+    esplink::TrustKeyPair aliceIdentity, bobIdentity;
+    crypto.generateKeyPair(aliceIdentity);
+    crypto.generateKeyPair(bobIdentity);
+
+    esplink::TrustPairingSession alice(crypto);
+    esplink::TrustPairingSession bob(crypto);
+
+    esplink::TrustHelloMessage aliceHello;
+    TEST_ASSERT_TRUE(alice.beginAsInitiator(aliceIdentity, 1000, aliceHello));
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::AwaitingPeerHello == alice.state());
+
+    esplink::TrustHelloMessage bobHello;
+    bool bobHasReply = false;
+    TEST_ASSERT_TRUE(bob.onPeerHello(aliceHello, bobIdentity, 1001, bobHello, bobHasReply));
+    TEST_ASSERT_TRUE(bobHasReply);
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::AwaitingApproval == bob.state());
+
+    esplink::TrustHelloMessage unusedReply;
+    bool aliceHasReply = false;
+    TEST_ASSERT_TRUE(alice.onPeerHello(bobHello, aliceIdentity, 1002, unusedReply, aliceHasReply));
+    TEST_ASSERT_FALSE(aliceHasReply);
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::AwaitingApproval == alice.state());
+
+    esplink::TrustPairingOutcome aliceOutcome, bobOutcome;
+    TEST_ASSERT_TRUE(alice.currentOutcome(aliceOutcome));
+    TEST_ASSERT_TRUE(bob.currentOutcome(bobOutcome));
+    TEST_ASSERT_EQUAL_UINT32(aliceOutcome.numericCode, bobOutcome.numericCode);  // same code both screens
+
+    esplink::TrustSignature aliceConfirm, bobConfirm;
+    TEST_ASSERT_TRUE(alice.confirmLocally(1003, aliceConfirm));
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::AwaitingPeerConfirm == alice.state());
+    TEST_ASSERT_TRUE(bob.confirmLocally(1004, bobConfirm));
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::AwaitingPeerConfirm == bob.state());
+
+    TEST_ASSERT_TRUE(alice.onPeerConfirm(bobConfirm, 1005));
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::Committed == alice.state());
+    TEST_ASSERT_TRUE(bob.onPeerConfirm(aliceConfirm, 1006));
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::Committed == bob.state());
+
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(alice.derivedKeys().lmk.data(), bob.derivedKeys().lmk.data(),
+                                 alice.derivedKeys().lmk.size());
+}
+
+void test_trust_pairing_peer_confirms_before_us() {
+    esplink::FakeTrustCrypto crypto;
+    esplink::TrustKeyPair aliceIdentity, bobIdentity;
+    crypto.generateKeyPair(aliceIdentity);
+    crypto.generateKeyPair(bobIdentity);
+
+    esplink::TrustPairingSession alice(crypto);
+    esplink::TrustPairingSession bob(crypto);
+    esplink::TrustHelloMessage aliceHello, bobHello, unused;
+    bool hasReply = false;
+    alice.beginAsInitiator(aliceIdentity, 0, aliceHello);
+    bob.onPeerHello(aliceHello, bobIdentity, 0, bobHello, hasReply);
+    alice.onPeerHello(bobHello, aliceIdentity, 0, unused, hasReply);
+
+    esplink::TrustSignature bobConfirm;
+    TEST_ASSERT_TRUE(bob.confirmLocally(0, bobConfirm));
+    TEST_ASSERT_TRUE(alice.onPeerConfirm(bobConfirm, 0));
+    // Alice hasn't tapped Confirm yet -- still waiting on the local human, not committed.
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::AwaitingApproval == alice.state());
+
+    esplink::TrustSignature aliceConfirm;
+    TEST_ASSERT_TRUE(alice.confirmLocally(0, aliceConfirm));
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::Committed == alice.state());  // peer already confirmed
+}
+
+void test_trust_pairing_cancel_and_timeout() {
+    esplink::FakeTrustCrypto crypto;
+    esplink::TrustKeyPair identity;
+    crypto.generateKeyPair(identity);
+
+    esplink::TrustPairingSession session(crypto);
+    esplink::TrustHelloMessage hello;
+    session.beginAsInitiator(identity, 0, hello);
+
+    bool shouldSend = false;
+    session.cancel(shouldSend);
+    TEST_ASSERT_TRUE(shouldSend);
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::Cancelled == session.state());
+
+    session.reset();
+    session.beginAsInitiator(identity, 0, hello);
+    TEST_ASSERT_FALSE(session.tick(30000));   // well under the 60s default timeout
+    TEST_ASSERT_TRUE(session.tick(60001));    // past it
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::Cancelled == session.state());
+}
+
+void test_trust_pairing_rejects_bad_signature() {
+    esplink::FakeTrustCrypto crypto;
+    esplink::TrustKeyPair identity;
+    crypto.generateKeyPair(identity);
+
+    esplink::TrustPairingSession responder(crypto);
+    esplink::TrustHelloMessage forged;
+    forged.staticPublicKey.fill(0xAA);
+    forged.ephemeralPublicKey.fill(0xBB);
+    forged.nonce.fill(0xCC);
+    forged.signature.fill(0x00);  // does not match FakeTrustCrypto's deterministic MAC
+
+    esplink::TrustHelloMessage reply;
+    bool hasReply = false;
+    TEST_ASSERT_FALSE(responder.onPeerHello(forged, identity, 0, reply, hasReply));
+    TEST_ASSERT_TRUE(esplink::TrustPairingState::Idle == responder.state());  // reset(), not stuck Cancelled
+}
+
 void setUp() {}
 void tearDown() {}
 
@@ -301,5 +411,9 @@ int main(int, char**) {
     RUN_TEST(test_trust_store_add_find_forget);
     RUN_TEST(test_trust_store_enforces_cap);
     RUN_TEST(test_trust_fingerprint_format);
+    RUN_TEST(test_trust_pairing_happy_path_both_confirm_first);
+    RUN_TEST(test_trust_pairing_peer_confirms_before_us);
+    RUN_TEST(test_trust_pairing_cancel_and_timeout);
+    RUN_TEST(test_trust_pairing_rejects_bad_signature);
     return UNITY_END();
 }
