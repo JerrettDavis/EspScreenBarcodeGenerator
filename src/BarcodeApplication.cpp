@@ -1,5 +1,7 @@
 #include "BarcodeApplication.h"
 
+#include <LittleFS.h>
+#include <SD.h>
 #include <esp_system.h>
 
 #include <algorithm>
@@ -182,6 +184,20 @@ void iconBackspace(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg)
     wl(g, cx + 3, cy - 3, cx - 2, cy + 3, c, bg);
 }
 
+// Outline + nub + a fill proportional to `percent`, same ~14-16px box as the rest of the
+// vocabulary. Fill color is the caller's choice (drawBatteryBadge picks danger/text by
+// level) so this glyph doesn't need theme access of its own.
+void iconBattery(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg, uint16_t fillColor, uint8_t percent) {
+    const int16_t x0 = static_cast<int16_t>(cx - 8), y0 = static_cast<int16_t>(cy - 5);
+    const int16_t w = 14, h = 10;
+    g.drawRoundRect(x0, y0, w, h, 2, c);
+    g.fillRect(static_cast<int16_t>(x0 + w), static_cast<int16_t>(cy - 2), 2, 4, c);
+    const int16_t innerW = static_cast<int16_t>(w - 4);
+    const int16_t fillW = static_cast<int16_t>(innerW * std::clamp<int>(percent, 0, 100) / 100);
+    g.fillRect(static_cast<int16_t>(x0 + 2), static_cast<int16_t>(y0 + 2), static_cast<int16_t>(innerW - fillW), h - 4, bg);
+    if (fillW > 0) g.fillRect(static_cast<int16_t>(x0 + 2 + innerW - fillW), static_cast<int16_t>(y0 + 2), fillW, h - 4, fillColor);
+}
+
 void iconRestart(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
     g.drawCircle(cx, cy, 6, c);
     g.drawCircle(cx, cy, 5, c);
@@ -235,6 +251,14 @@ Rect homeChipRect(uint16_t width, uint16_t height) {
     const int16_t h = static_cast<int16_t>(barH - 4);
     const int16_t w = static_cast<int16_t>(width > height ? 176 : 190);
     return Rect{6, 2, w, h};
+}
+
+// Battery badge sits in the gap between the symbology chip and the save-icon/theme-toggle
+// cluster on the right -- there's ~150-220px of unused space there depending on
+// orientation, plenty for a small icon + "NN%" at font size 1.
+Rect homeBatteryBadgeRect(uint16_t width, uint16_t height) {
+    const Rect chip = homeChipRect(width, height);
+    return Rect{static_cast<int16_t>(chip.x + chip.w + 8), 0, 48, homeTopBarHeight(width, height)};
 }
 
 // ---- Data preview card ----
@@ -311,6 +335,13 @@ Rect subHeaderToggleRect(uint16_t width, uint16_t height) {
     return Rect{static_cast<int16_t>(width - sw - 6), static_cast<int16_t>((barH - sh) / 2), sw, sh};
 }
 
+// Battery badge sits just left of the theme toggle, on every subHeader-based screen.
+Rect subHeaderBatteryBadgeRect(uint16_t width, uint16_t height) {
+    const Rect toggle = subHeaderToggleRect(width, height);
+    const int16_t w = 48;
+    return Rect{static_cast<int16_t>(toggle.x - w - 6), 0, w, subHeaderHeight(width, height)};
+}
+
 // ---- Gateway-mode Home banner ----
 
 int16_t gatewayBannerIconCy(uint16_t width, uint16_t height) {
@@ -373,6 +404,16 @@ Rect optionsDisplayButtonRect(uint16_t width, uint16_t height) {
 Rect settingsCardRect(uint16_t width, uint16_t height, int16_t contentTop) {
     const int16_t y = static_cast<int16_t>(contentTop + 6);
     const int16_t h = static_cast<int16_t>(std::min<int>(120, height - contentTop - 14));
+    return Rect{8, y, static_cast<int16_t>(width - 16), h};
+}
+
+// Like settingsCardRect but sized for `rows` rows at a fixed 40px each, rather than the
+// fixed 3-row/120px cap -- used by drawSettings() now that a 4th toggle row (Show Battery
+// %) was added. settingsCardRect itself stays untouched since drawTrust() also uses it,
+// for its pairing-code card, and doesn't need the extra height.
+Rect settingsRowsCardRect(uint16_t width, uint16_t height, int16_t contentTop, int rows) {
+    const int16_t y = static_cast<int16_t>(contentTop + 6);
+    const int16_t h = static_cast<int16_t>(std::min<int>(rows * 40, height - contentTop - 14));
     return Rect{8, y, static_cast<int16_t>(width - 16), h};
 }
 
@@ -452,9 +493,14 @@ int16_t settingsContentBottomY(uint16_t width, const Rect& card, bool gatewayMod
     return static_cast<int16_t>(linkRow.y + linkRow.h);
 }
 
-Rect settingsTrustButtonRect(uint16_t width, const Rect& card, bool gatewayModeActive) {
-    const int16_t y = static_cast<int16_t>(settingsContentBottomY(width, card, gatewayModeActive) + 10);
-    return Rect{8, y, static_cast<int16_t>(width - 16), 36};
+// Trust and Storage side by side (rather than one full-width button) -- the +6 gap here
+// (vs. the +12/+10 used elsewhere on this screen) is what keeps the stack clear of
+// settingsGatewayModeButtonRect's bottom anchor on the shortest supported (landscape,
+// 480x320) height now that the card above has grown by a row.
+std::array<Rect, 2> settingsNavButtons(uint16_t width, const Rect& card, bool gatewayModeActive) {
+    const int16_t y = static_cast<int16_t>(settingsContentBottomY(width, card, gatewayModeActive) + 6);
+    const auto row = distributeRow(width, y, 36, 2);
+    return {row[0], row[1]};
 }
 
 // Bottom-anchored (rather than stacked below the Trust button) so it never collides with the
@@ -462,6 +508,18 @@ Rect settingsTrustButtonRect(uint16_t width, const Rect& card, bool gatewayModeA
 // (landscape) height -- same anchoring gatewayFooterButtons uses on the Gateway screen.
 Rect settingsGatewayModeButtonRect(uint16_t width, uint16_t height) {
     return Rect{8, static_cast<int16_t>(height - 42), static_cast<int16_t>(width - 16), 34};
+}
+
+// ---- Storage screen ----
+
+Rect storageCardRect(uint16_t width, uint16_t height, int16_t contentTop) {
+    return settingsRowsCardRect(width, height, contentTop, 1);
+}
+
+// Shared shape for both the SD-card and battery status lines below the card -- same visual
+// language as gatewayLinkStatusRowRect (a dot + a label in a rounded pill).
+Rect storageStatusRowRect(uint16_t width, int16_t rowTop) {
+    return Rect{8, rowTop, static_cast<int16_t>(width - 16), 28};
 }
 
 // ---- Trust screen ----
@@ -539,7 +597,23 @@ bool BarcodeApplication::begin(std::string& error) {
     tft_.setTextWrap(false, false);
     tft_.fillScreen(theme().bg);
 
-    if (!presets_.begin(error)) return false;
+    battery_.begin();
+    batteryVoltage_ = battery_.readVoltageVolts();
+    batteryPercent_ = battery_.readPercent();
+
+    // Non-fatal: an absent/unreadable card just leaves sdCard_.mounted() false and presets
+    // fall back to internal flash below, same as a fresh board with sdCardStorageEnabled()
+    // still at its default (false).
+    std::string sdError;
+    sdCard_.begin(sdError);
+    presetsUseSd_ = config_.sdCardStorageEnabled() && sdCard_.mounted();
+    if (presetsUseSd_) {
+        if (!presets_.begin(error, SD)) return false;
+    } else {
+        // LittleFS is already mounted by config_.begin() above; PresetStore only needs its
+        // own /presets directory within it.
+        if (!presets_.begin(error, LittleFS)) return false;
+    }
     spec_.type = Symbology::QrCode;
     spec_.data = "LAB-TEST-001";
     showHome("Ready: touch keys or use USB serial");
@@ -548,6 +622,7 @@ bool BarcodeApplication::begin(std::string& error) {
 
 void BarcodeApplication::loop() {
     pollTouch();
+    pollBattery();
 }
 
 void BarcodeApplication::setBacklight(bool on) {
@@ -588,6 +663,7 @@ void BarcodeApplication::redrawView(View view) {
         case View::Settings: drawSettings(); break;
         case View::Gateway: drawGateway(); break;
         case View::Trust: drawTrust(); break;
+        case View::Storage: drawStorage(); break;
         case View::Barcode: break;  // always white/black regardless of theme; nothing to restyle
     }
 }
@@ -672,6 +748,7 @@ void BarcodeApplication::handleTouch(uint16_t x, uint16_t y) {
         case View::Settings: handleSettingsTouch(x, y); break;
         case View::Gateway: handleGatewayTouch(x, y); break;
         case View::Trust: handleTrustTouch(x, y); break;
+        case View::Storage: handleStorageTouch(x, y); break;
         case View::Barcode:
             if (millis() - barcodeShownAt_ >= app_config::kTouchCloseGuardMs) closeBarcode();
             break;
@@ -717,6 +794,56 @@ void BarcodeApplication::drawMiniSwitch(const Rect& rect, bool on) {
     tft_.fillCircle(knobCx, static_cast<int16_t>(rect.y + rect.h / 2), knobD / 2, on ? TFT_WHITE : th.textMuted);
 }
 
+void BarcodeApplication::drawBatteryBadge(const Rect& rect) {
+    const Theme& th = theme();
+    tft_.fillRect(rect.x, rect.y, rect.w, rect.h, th.bg);
+    if (!config_.showBatteryPercent()) return;
+    const uint16_t fillColor = batteryPercent_ <= 15 ? th.danger : th.textMuted;
+    const int16_t iconCx = static_cast<int16_t>(rect.x + 10);
+    const int16_t iconCy = static_cast<int16_t>(rect.y + rect.h / 2);
+    iconBattery(tft_, iconCx, iconCy, th.textMuted, th.bg, fillColor, batteryPercent_);
+    char label[6];
+    std::snprintf(label, sizeof(label), "%u%%", batteryPercent_);
+    tft_.setTextDatum(ML_DATUM);
+    tft_.setTextColor(th.textMuted, th.bg);
+    tft_.drawString(label, static_cast<int16_t>(rect.x + 22), iconCy, 1);
+}
+
+void BarcodeApplication::redrawBatteryBadge() {
+    if (!config_.showBatteryPercent()) return;
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    switch (view_) {
+        case View::Home:
+            if (gatewayModeActive_) drawBatteryBadge(subHeaderBatteryBadgeRect(width, height));
+            else if (width > height) drawBatteryBadge(homeBatteryBadgeRect(width, height));
+            break;
+        case View::TypePicker:
+        case View::Options:
+        case View::Presets:
+        case View::Settings:
+        case View::Gateway:
+        case View::Trust:
+        case View::Storage:
+            drawBatteryBadge(subHeaderBatteryBadgeRect(width, height));
+            break;
+        case View::Barcode:
+            break;  // fullscreen barcode render; no badge overlay
+    }
+}
+
+void BarcodeApplication::pollBattery() {
+    const uint32_t now = millis();
+    if (now - batteryPollAt_ < 5000) return;
+    batteryPollAt_ = now;
+    batteryVoltage_ = battery_.readVoltageVolts();
+    batteryPercent_ = battery_.readPercent();
+    if (batteryPercent_ == lastDrawnBatteryPercent_) return;
+    lastDrawnBatteryPercent_ = batteryPercent_;
+    redrawBatteryBadge();
+    if (view_ == View::Storage) drawStorageBatteryRow();
+}
+
 int16_t BarcodeApplication::drawSubHeader(const std::string& title, bool showBack) {
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
@@ -734,6 +861,7 @@ int16_t BarcodeApplication::drawSubHeader(const std::string& title, bool showBac
     tft_.setTextColor(th.text, th.bg);
     tft_.drawString(title.c_str(), textX, static_cast<int16_t>(h / 2), 4);
     drawThemeSwitch(subHeaderToggleRect(width, height));
+    drawBatteryBadge(subHeaderBatteryBadgeRect(width, height));
     return h;
 }
 
@@ -774,11 +902,14 @@ void BarcodeApplication::updateGatewayStats(const esplink::GatewayRelay::Stats& 
 
 void BarcodeApplication::updateGatewayLinkStatus(const esplink::GatewayLinkInfo& status) {
     gatewayLinkStatus_ = status;
-    if (view_ != View::Settings) return;
+    if (view_ != View::Settings || gatewayModeActive_) return;
     const uint32_t now = millis();
     if (now - gatewayLinkRedrawAt_ < 1000) return;
     gatewayLinkRedrawAt_ = now;
-    drawSettings();
+    // Refresh just this one row in place rather than the whole Settings screen (drawSettings()
+    // would fillScreen() first) -- that full-screen wipe-then-redraw is what read as flicker,
+    // once per second, for as long as the user sat on this screen.
+    drawSettingsLinkStatusRow();
 }
 
 bool BarcodeApplication::consumeGatewayPingRequest() {
@@ -908,6 +1039,7 @@ void BarcodeApplication::drawHome() {
         tft_.setTextColor(th.text, th.bg);
         tft_.drawString("Gateway Mode", static_cast<int16_t>(width / 2), static_cast<int16_t>(h / 2), 4);
         drawThemeSwitch(subHeaderToggleRect(width, height));
+        drawBatteryBadge(subHeaderBatteryBadgeRect(width, height));
         drawGatewayHomeBanner();
         return;
     }
@@ -925,6 +1057,11 @@ void BarcodeApplication::drawHome() {
 
     const Rect toggle = homeToggleRect(width, height);
     drawThemeSwitch(toggle);
+    // Only landscape has room for a badge here without colliding with the byte-count text
+    // beside the save icon -- portrait's top bar is too narrow (see homeBatteryBadgeRect);
+    // the badge still shows up on every subHeader-based screen (Settings, Storage, etc.)
+    // regardless of orientation.
+    if (width > height) drawBatteryBadge(homeBatteryBadgeRect(width, height));
     const Rect saveIcon = homeSaveIconRect(width, height);
     tft_.fillRoundRect(saveIcon.x, saveIcon.y, saveIcon.w, saveIcon.h, 7, th.surface);
     tft_.drawRoundRect(saveIcon.x, saveIcon.y, saveIcon.w, saveIcon.h, 7, th.hairline);
@@ -1526,10 +1663,10 @@ void BarcodeApplication::drawSettings() {
         {"Barcode Orientation", config_.barcodeOrientation()},
         {"Editor Orientation", config_.editorOrientation()},
     }};
-    const Rect card = settingsCardRect(width, height, contentTop);
+    const Rect card = settingsRowsCardRect(width, height, contentTop, 4);
     tft_.fillRoundRect(card.x, card.y, card.w, card.h, 12, th.surface);
     tft_.drawRoundRect(card.x, card.y, card.w, card.h, 12, th.hairline);
-    const int16_t rowH = static_cast<int16_t>(card.h / 3);
+    const int16_t rowH = static_cast<int16_t>(card.h / 4);
     for (int row = 0; row < 2; ++row) {
         const int16_t y = static_cast<int16_t>(card.y + row * rowH);
         if (row > 0) tft_.drawFastHLine(static_cast<int16_t>(card.x + 2), y, static_cast<int16_t>(card.w - 4), th.hairline);
@@ -1556,32 +1693,28 @@ void BarcodeApplication::drawSettings() {
         drawMiniSwitch(sw, securePairingEnabled_);
     }
 
+    // Row 4: Show Battery % toggle -- gates drawBatteryBadge() everywhere else it's drawn
+    // (Home top bar and every subHeader-based screen).
+    {
+        const int16_t y = static_cast<int16_t>(card.y + 3 * rowH);
+        tft_.drawFastHLine(static_cast<int16_t>(card.x + 2), y, static_cast<int16_t>(card.w - 4), th.hairline);
+        tft_.setTextDatum(ML_DATUM);
+        tft_.setTextColor(th.text, th.surface);
+        tft_.drawString("Show Battery %", static_cast<int16_t>(card.x + 12), static_cast<int16_t>(y + rowH / 2), 2);
+        const Rect sw{static_cast<int16_t>(card.x + card.w - 42), static_cast<int16_t>(y + rowH / 2 - 9), 30, 18};
+        drawMiniSwitch(sw, config_.showBatteryPercent());
+    }
+
     // Gateway relay mode has its own live stats screen (View::Gateway) for this board's own
     // radio role; this row is the complementary "am I near a gateway?" indicator for a board
     // running as a plain client, fed by EspNowEndpoint's discovery ping/pong (see main.cpp).
-    if (!gatewayModeActive_) {
-        const Rect linkRow = gatewayLinkStatusRowRect(width, static_cast<int16_t>(card.y + card.h));
-        tft_.fillRoundRect(linkRow.x, linkRow.y, linkRow.w, linkRow.h, 10, th.surface);
-        tft_.drawRoundRect(linkRow.x, linkRow.y, linkRow.w, linkRow.h, 10, th.hairline);
-        tft_.fillCircle(static_cast<int16_t>(linkRow.x + 16), static_cast<int16_t>(linkRow.y + linkRow.h / 2), 4,
-                        gatewayLinkStatus_.connected ? th.accent : th.textFaint);
-        tft_.setTextDatum(ML_DATUM);
-        tft_.setTextColor(th.text, th.surface);
-        std::string label;
-        if (gatewayLinkStatus_.connected) {
-            label = "ESP-NOW Gateway: connected";
-            if (gatewayLinkStatus_.rttMs > 0) label += " (" + std::to_string(gatewayLinkStatus_.rttMs) + "ms)";
-        } else if (!gatewayLinkStatus_.gatewayId.empty()) {
-            label = "ESP-NOW Gateway: lost";
-        } else {
-            label = "ESP-NOW Gateway: searching...";
-        }
-        tft_.drawString(label.c_str(), static_cast<int16_t>(linkRow.x + 28), static_cast<int16_t>(linkRow.y + linkRow.h / 2), 1);
-    }
+    if (!gatewayModeActive_) drawSettingsLinkStatusRow();
 
-    // "Trust" navigation button below whatever else this screen rendered -- same accent-button
-    // shape as drawGatewayHomeBanner's button-to-View::Gateway pattern.
-    drawButton(settingsTrustButtonRect(width, card, gatewayModeActive_), "TRUST", true);
+    // "Trust"/"Storage" navigation buttons below whatever else this screen rendered -- same
+    // accent-button shape as drawGatewayHomeBanner's button-to-View::Gateway pattern.
+    const auto navButtons = settingsNavButtons(width, card, gatewayModeActive_);
+    drawButton(navButtons[0], "TRUST", true);
+    drawButton(navButtons[1], "STORAGE", true);
 
     // On-screen entry point into Gateway mode -- previously only reachable via the "gateway" USB
     // command a connected host sends over the legacy serial line (see SerialLegacyEndpoint).
@@ -1592,16 +1725,48 @@ void BarcodeApplication::drawSettings() {
     }
 }
 
+void BarcodeApplication::drawSettingsLinkStatusRow() {
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const int16_t contentTop = subHeaderHeight(width, height);
+    const Rect card = settingsRowsCardRect(width, height, contentTop, 4);
+    const Theme& th = theme();
+
+    const Rect linkRow = gatewayLinkStatusRowRect(width, static_cast<int16_t>(card.y + card.h));
+    tft_.fillRoundRect(linkRow.x, linkRow.y, linkRow.w, linkRow.h, 10, th.surface);
+    tft_.drawRoundRect(linkRow.x, linkRow.y, linkRow.w, linkRow.h, 10, th.hairline);
+    tft_.fillCircle(static_cast<int16_t>(linkRow.x + 16), static_cast<int16_t>(linkRow.y + linkRow.h / 2), 4,
+                    gatewayLinkStatus_.connected ? th.accent : th.textFaint);
+    tft_.setTextDatum(ML_DATUM);
+    tft_.setTextColor(th.text, th.surface);
+    std::string label;
+    if (gatewayLinkStatus_.connected) {
+        label = "ESP-NOW Gateway: connected";
+        if (gatewayLinkStatus_.rttMs > 0) label += " (" + std::to_string(gatewayLinkStatus_.rttMs) + "ms)";
+    } else if (!gatewayLinkStatus_.gatewayId.empty()) {
+        label = "ESP-NOW Gateway: lost";
+    } else {
+        label = "ESP-NOW Gateway: searching...";
+    }
+    tft_.drawString(label.c_str(), static_cast<int16_t>(linkRow.x + 28), static_cast<int16_t>(linkRow.y + linkRow.h / 2), 1);
+}
+
 void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
     if (handleSubHeaderTouch(x, y, View::Home)) return;
     const uint16_t width = tft_.width();
     const uint16_t height = tft_.height();
     const int16_t contentTop = subHeaderHeight(width, height);
-    const Rect card = settingsCardRect(width, height, contentTop);
+    const Rect card = settingsRowsCardRect(width, height, contentTop, 4);
 
-    if (settingsTrustButtonRect(width, card, gatewayModeActive_).contains(x, y, kTouchPad)) {
+    const auto navButtons = settingsNavButtons(width, card, gatewayModeActive_);
+    if (navButtons[0].contains(x, y, kTouchPad)) {
         view_ = View::Trust;
         drawTrust();
+        return;
+    }
+    if (navButtons[1].contains(x, y, kTouchPad)) {
+        view_ = View::Storage;
+        drawStorage();
         return;
     }
 
@@ -1613,9 +1778,18 @@ void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
     }
 
     if (!card.contains(x, y, 0)) return;
-    const int16_t rowH = static_cast<int16_t>(card.h / 3);
+    const int16_t rowH = static_cast<int16_t>(card.h / 4);
     const int row = (static_cast<int>(y) - card.y) / rowH;
-    if (row < 0 || row > 2) return;
+    if (row < 0 || row > 3) return;
+
+    if (row == 3) {
+        std::string error;
+        if (!config_.setShowBatteryPercent(!config_.showBatteryPercent(), error)) {
+            setStatus("Battery display save failed: " + error, view_ == View::Home);
+        }
+        drawSettings();
+        return;
+    }
 
     if (row == 2) {
         securePairingToggleValue_ = !securePairingEnabled_;
@@ -1906,6 +2080,97 @@ void BarcodeApplication::handleTrustTouch(uint16_t x, uint16_t y) {
         trustForgetFingerprint_ = peers[static_cast<std::size_t>(row)].fingerprint;
         trustForgetRequested_ = true;
     }
+}
+
+namespace {
+std::string formatBytesGB(uint64_t bytes) {
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "%.1f GB", static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0));
+    return buf;
+}
+}  // namespace
+
+void BarcodeApplication::drawStorage() {
+    applyOrientationForView(View::Storage);
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const Theme& th = theme();
+
+    tft_.fillScreen(th.bg);
+    const int16_t contentTop = drawSubHeader("Storage");
+
+    const Rect card = storageCardRect(width, height, contentTop);
+    tft_.fillRoundRect(card.x, card.y, card.w, card.h, 12, th.surface);
+    tft_.drawRoundRect(card.x, card.y, card.w, card.h, 12, th.hairline);
+    tft_.setTextDatum(ML_DATUM);
+    tft_.setTextColor(th.text, th.surface);
+    tft_.drawString("Store Presets on SD", static_cast<int16_t>(card.x + 12), static_cast<int16_t>(card.y + card.h / 2), 2);
+    const Rect sw{static_cast<int16_t>(card.x + card.w - 42), static_cast<int16_t>(card.y + card.h / 2 - 9), 30, 18};
+    drawMiniSwitch(sw, config_.sdCardStorageEnabled());
+
+    // SD status: mount state doesn't change while the device is running (no hot-swap
+    // handling), so this is a plain static draw rather than a periodically-refreshed row
+    // like the battery line below it.
+    const Rect sdRow = storageStatusRowRect(width, static_cast<int16_t>(card.y + card.h + 12));
+    tft_.fillRoundRect(sdRow.x, sdRow.y, sdRow.w, sdRow.h, 10, th.surface);
+    tft_.drawRoundRect(sdRow.x, sdRow.y, sdRow.w, sdRow.h, 10, th.hairline);
+    tft_.fillCircle(static_cast<int16_t>(sdRow.x + 16), static_cast<int16_t>(sdRow.y + sdRow.h / 2), 4,
+                    sdCard_.mounted() ? th.accent : th.textFaint);
+    tft_.setTextDatum(ML_DATUM);
+    tft_.setTextColor(th.text, th.surface);
+    std::string sdLabel;
+    if (sdCard_.mounted()) {
+        sdLabel = "SD Card: " + formatBytesGB(sdCard_.totalBytes()) + " (" + formatBytesGB(sdCard_.usedBytes()) + " used)";
+    } else {
+        sdLabel = "SD Card: not detected";
+    }
+    tft_.drawString(sdLabel.c_str(), static_cast<int16_t>(sdRow.x + 28), static_cast<int16_t>(sdRow.y + sdRow.h / 2), 1);
+
+    // Whether the toggle above matches what PresetStore was actually begun against -- flips
+    // the moment the setting is toggled, since the running PresetStore doesn't swap
+    // backends live (see DeviceConfigStore::sdCardStorageEnabled's doc comment).
+    if (config_.sdCardStorageEnabled() != presetsUseSd_) {
+        tft_.setTextDatum(TL_DATUM);
+        tft_.setTextColor(th.textFaint, th.bg);
+        tft_.drawString("Restart to apply", static_cast<int16_t>(sdRow.x), static_cast<int16_t>(sdRow.y + sdRow.h + 4), 1);
+    }
+
+    drawStorageBatteryRow();
+}
+
+void BarcodeApplication::drawStorageBatteryRow() {
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const int16_t contentTop = subHeaderHeight(width, height);
+    const Rect card = storageCardRect(width, height, contentTop);
+    const Theme& th = theme();
+
+    const Rect sdRow = storageStatusRowRect(width, static_cast<int16_t>(card.y + card.h + 12));
+    const Rect battRow = storageStatusRowRect(width, static_cast<int16_t>(sdRow.y + sdRow.h + 24));
+    tft_.fillRoundRect(battRow.x, battRow.y, battRow.w, battRow.h, 10, th.surface);
+    tft_.drawRoundRect(battRow.x, battRow.y, battRow.w, battRow.h, 10, th.hairline);
+    const uint16_t dotColor = batteryPercent_ <= 15 ? th.danger : th.accent;
+    tft_.fillCircle(static_cast<int16_t>(battRow.x + 16), static_cast<int16_t>(battRow.y + battRow.h / 2), 4, dotColor);
+    tft_.setTextDatum(ML_DATUM);
+    tft_.setTextColor(th.text, th.surface);
+    char label[40];
+    std::snprintf(label, sizeof(label), "Battery: %u%% (%.2fV)", batteryPercent_, static_cast<double>(batteryVoltage_));
+    tft_.drawString(label, static_cast<int16_t>(battRow.x + 28), static_cast<int16_t>(battRow.y + battRow.h / 2), 1);
+}
+
+void BarcodeApplication::handleStorageTouch(uint16_t x, uint16_t y) {
+    if (handleSubHeaderTouch(x, y, View::Settings)) return;
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const int16_t contentTop = subHeaderHeight(width, height);
+    const Rect card = storageCardRect(width, height, contentTop);
+    if (!card.contains(x, y, 0)) return;
+
+    std::string error;
+    if (!config_.setSdCardStorageEnabled(!config_.sdCardStorageEnabled(), error)) {
+        setStatus("SD storage save failed: " + error, view_ == View::Home);
+    }
+    drawStorage();
 }
 
 bool BarcodeApplication::generate(const BarcodeSpec& spec, bool display, std::string& error) {

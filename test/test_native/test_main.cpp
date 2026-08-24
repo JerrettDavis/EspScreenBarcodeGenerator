@@ -169,6 +169,35 @@ void test_landscape_home_button_layout_has_no_overlaps_and_fits_screen() {
     }
 }
 
+void test_settings_screen_layout_has_no_overlaps_and_fits_landscape_screen() {
+    // Mirrors drawSettings()'s landscape (480x320, the tightest supported height) layout
+    // after the Show-Battery-% row (4th card row) and the Trust/Storage nav-button split
+    // were added. This is the tightest fit on the screen -- 2px of slack between the nav
+    // buttons and the red "ENTER GATEWAY MODE" button -- so a regression here is exactly
+    // the kind of overlap a future row addition could reintroduce silently.
+    constexpr int16_t kScreenWidth = 480;
+    constexpr int16_t kScreenHeight = 320;
+    static constexpr Rect kCard{8, 34, 464, 160};              // settingsRowsCardRect(...,4)
+    static constexpr Rect kLinkRow{8, 206, 464, 28};           // gatewayLinkStatusRowRect
+    static constexpr Rect kTrustButton{8, 240, 228, 36};       // settingsNavButtons()[0]
+    static constexpr Rect kStorageButton{244, 240, 228, 36};   // settingsNavButtons()[1]
+    static constexpr Rect kGatewayModeButton{8, 278, 464, 34}; // settingsGatewayModeButtonRect
+
+    static constexpr Rect kRects[] = {kCard, kLinkRow, kTrustButton, kStorageButton, kGatewayModeButton};
+    for (const Rect& r : kRects) {
+        TEST_ASSERT_TRUE(r.x >= 0);
+        TEST_ASSERT_TRUE(r.y >= 0);
+        TEST_ASSERT_TRUE(r.x + r.w <= kScreenWidth);
+        TEST_ASSERT_TRUE(r.y + r.h <= kScreenHeight);
+    }
+    constexpr std::size_t kCount = sizeof(kRects) / sizeof(kRects[0]);
+    for (std::size_t i = 0; i < kCount; ++i) {
+        for (std::size_t j = i + 1; j < kCount; ++j) {
+            TEST_ASSERT_FALSE_MESSAGE(uigeom::overlaps(kRects[i], kRects[j]), "settings screen rows/buttons overlap");
+        }
+    }
+}
+
 void test_touch_pad_closes_gap_without_crossing_neighbor() {
     // Regression test for the CLEAR button being unreachable in the narrow
     // 8px gap between TYPE and CLEAR (and CLEAR and SAVE).
@@ -488,6 +517,7 @@ int main(int, char**) {
     RUN_TEST(test_random_payload_always_encodes);
     RUN_TEST(test_home_button_layout_has_no_overlaps_and_fits_screen);
     RUN_TEST(test_landscape_home_button_layout_has_no_overlaps_and_fits_screen);
+    RUN_TEST(test_settings_screen_layout_has_no_overlaps_and_fits_landscape_screen);
     RUN_TEST(test_touch_pad_closes_gap_without_crossing_neighbor);
     RUN_TEST(test_trust_hello_round_trip);
     RUN_TEST(test_trust_store_add_find_forget);

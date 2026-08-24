@@ -9,11 +9,13 @@
 #include <vector>
 
 #include "ApplicationPorts.h"
+#include "BatteryMonitor.h"
 #include "DeviceConfigStore.h"
 #include "EspBarcodeCore.h"
 #include "GatewayRelay.h"
 #include "PresetStore.h"
 #include "ScreenOrientation.h"
+#include "SdCardStore.h"
 #include "Theme.h"
 #include "UiRect.h"
 
@@ -80,6 +82,14 @@ public:
     esplink::ScreenOrientation barcodeOrientation() const { return config_.barcodeOrientation(); }
     esplink::ScreenOrientation editorOrientation() const { return config_.editorOrientation(); }
 
+    // Read-only status for main.cpp's boot diagnostic log (mirrors the espnow_ready/ble_ready
+    // pattern) -- lets SD/battery presence be confirmed from the serial monitor alone, without
+    // needing to read the on-device screen.
+    bool sdCardMounted() const { return sdCard_.mounted(); }
+    bool presetsUseSd() const { return presetsUseSd_; }
+    uint8_t batteryPercent() const { return batteryPercent_; }
+    float batteryVoltage() const { return batteryVoltage_; }
+
     const espbarcode::BarcodeSpec& activeSpec() const { return spec_; }
     const espbarcode::BarcodeResult& currentResult() const { return current_; }
     bool hasCurrent() const { return hasCurrent_; }
@@ -95,7 +105,7 @@ public:
     using Rect = uigeom::Rect;
 
 private:
-    enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcode, Gateway, Trust };
+    enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcode, Gateway, Trust, Storage };
     enum class KeyboardPage : uint8_t { Upper, Lower, Numeric, Symbols };
 
     void pollTouch();
@@ -109,6 +119,7 @@ private:
     void handleKeyboardTouch(uint16_t x, uint16_t y);
     void handleGatewayTouch(uint16_t x, uint16_t y);
     void handleTrustTouch(uint16_t x, uint16_t y);
+    void handleStorageTouch(uint16_t x, uint16_t y);
     void rebootDevice();
 
     void applyOrientationForView(View view);
@@ -119,8 +130,25 @@ private:
     void drawOptions();
     void drawPresets();
     void drawSettings();
+    // Redraws only the ESP-NOW gateway-link status row within Settings, in place -- used by
+    // updateGatewayLinkStatus()'s periodic refresh so it doesn't have to fillScreen() the whole
+    // Settings view (and everything on it) just to update this one line.
+    void drawSettingsLinkStatusRow();
     void drawGateway();
     void drawTrust();
+    void drawStorage();
+    // Redraws only the battery-status line within the Storage screen, in place -- same
+    // partial-redraw pattern as drawSettingsLinkStatusRow, fed by pollBattery()'s periodic
+    // refresh so it doesn't fillScreen() the whole Storage view once per tick.
+    void drawStorageBatteryRow();
+    // Draws the small battery icon+percent badge at `rect` -- called from drawHome() and
+    // drawSubHeader() (so it appears on every screen) as well as pollBattery()'s periodic
+    // partial refresh. No-op when config_.showBatteryPercent() is false.
+    void drawBatteryBadge(const Rect& rect);
+    // Redraws just the battery badge for whichever view is currently on screen, picking
+    // the right rect for Home vs. a subHeader-based screen; used by pollBattery().
+    void redrawBatteryBadge();
+    void pollBattery();
     void drawKeyboard();
     void drawButton(const Rect& rect,
                     const std::string& text,
@@ -155,6 +183,17 @@ private:
     TFT_eSPI tft_;
     PresetStore presets_;
     DeviceConfigStore config_;
+    SdCardStore sdCard_;
+    BatteryMonitor battery_;
+    // What PresetStore was actually begun against (SD vs LittleFS) -- decided once, at
+    // begin(), from config_.sdCardStorageEnabled() && sdCard_.mounted(). The Storage screen
+    // compares this against the live setting to tell the user when a toggle needs a reboot
+    // to take effect.
+    bool presetsUseSd_ = false;
+    uint8_t batteryPercent_ = 100;
+    float batteryVoltage_ = 0.0f;
+    uint8_t lastDrawnBatteryPercent_ = 255;  // sentinel: forces the first draw to happen
+    uint32_t batteryPollAt_ = 0;
     esplink::ScreenOrientation appliedOrientation_ = esplink::ScreenOrientation::Deg90;
     espbarcode::BarcodeSpec spec_;
     espbarcode::BarcodeResult current_;

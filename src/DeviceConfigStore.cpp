@@ -41,6 +41,8 @@ bool DeviceConfigStore::load() {
     barcodeOrientation_ = barcode;
     editorOrientation_ = editor;
     darkTheme_ = document["dark_theme"] | true;
+    sdCardStorageEnabled_ = document["sd_card_storage"] | false;
+    showBatteryPercent_ = document["show_battery_percent"] | true;
     return true;
 }
 
@@ -50,6 +52,8 @@ bool DeviceConfigStore::save(std::string& error) const {
     document["barcode_orientation"] = static_cast<int>(barcodeOrientation_);
     document["editor_orientation"] = static_cast<int>(editorOrientation_);
     document["dark_theme"] = darkTheme_;
+    document["sd_card_storage"] = sdCardStorageEnabled_;
+    document["show_battery_percent"] = showBatteryPercent_;
 
     File file = LittleFS.open(kConfigPath, "w");
     if (!file) {
@@ -84,6 +88,26 @@ bool DeviceConfigStore::setDarkTheme(bool value, std::string& error) {
     darkTheme_ = value;
     if (!save(error)) {
         darkTheme_ = previous;
+        return false;
+    }
+    return true;
+}
+
+bool DeviceConfigStore::setSdCardStorageEnabled(bool value, std::string& error) {
+    const bool previous = sdCardStorageEnabled_;
+    sdCardStorageEnabled_ = value;
+    if (!save(error)) {
+        sdCardStorageEnabled_ = previous;
+        return false;
+    }
+    return true;
+}
+
+bool DeviceConfigStore::setShowBatteryPercent(bool value, std::string& error) {
+    const bool previous = showBatteryPercent_;
+    showBatteryPercent_ = value;
+    if (!save(error)) {
+        showBatteryPercent_ = previous;
         return false;
     }
     return true;

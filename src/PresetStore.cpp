@@ -1,7 +1,6 @@
 #include "PresetStore.h"
 
 #include <ArduinoJson.h>
-#include <LittleFS.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -13,12 +12,9 @@ constexpr const char* kPresetDirectory = "/presets";
 constexpr std::size_t kMaxPresets = 32;
 }
 
-bool PresetStore::begin(std::string& error) {
-    if (!LittleFS.begin(true, "/littlefs", 10, "littlefs")) {
-        error = "LittleFS initialization failed";
-        return false;
-    }
-    if (!LittleFS.exists(kPresetDirectory) && !LittleFS.mkdir(kPresetDirectory)) {
+bool PresetStore::begin(std::string& error, fs::FS& filesystem) {
+    fs_ = &filesystem;
+    if (!fs_->exists(kPresetDirectory) && !fs_->mkdir(kPresetDirectory)) {
         error = "could not create preset directory";
         return false;
     }
@@ -45,7 +41,7 @@ bool PresetStore::save(const std::string& name,
         return false;
     }
     const std::string path = pathFor(name);
-    if (!LittleFS.exists(path.c_str()) && list().size() >= kMaxPresets) {
+    if (!fs_->exists(path.c_str()) && list().size() >= kMaxPresets) {
         error = "preset limit reached";
         return false;
     }
@@ -66,7 +62,7 @@ bool PresetStore::save(const std::string& name,
     document["invert"] = spec.invert;
     document["checksum"] = spec.checksum;
 
-    File file = LittleFS.open(path.c_str(), "w");
+    File file = fs_->open(path.c_str(), "w");
     if (!file) {
         error = "could not open preset for writing";
         return false;
@@ -74,7 +70,7 @@ bool PresetStore::save(const std::string& name,
     const std::size_t written = serializeJson(document, file);
     file.close();
     if (written == 0) {
-        LittleFS.remove(path.c_str());
+        fs_->remove(path.c_str());
         error = "could not serialize preset";
         return false;
     }
@@ -88,7 +84,7 @@ bool PresetStore::load(const std::string& name,
         error = "invalid preset name";
         return false;
     }
-    File file = LittleFS.open(pathFor(name).c_str(), "r");
+    File file = fs_->open(pathFor(name).c_str(), "r");
     if (!file) {
         error = "preset not found";
         return false;
@@ -138,11 +134,11 @@ bool PresetStore::remove(const std::string& name, std::string& error) {
         return false;
     }
     const std::string path = pathFor(name);
-    if (!LittleFS.exists(path.c_str())) {
+    if (!fs_->exists(path.c_str())) {
         error = "preset not found";
         return false;
     }
-    if (!LittleFS.remove(path.c_str())) {
+    if (!fs_->remove(path.c_str())) {
         error = "could not delete preset";
         return false;
     }
@@ -151,7 +147,7 @@ bool PresetStore::remove(const std::string& name, std::string& error) {
 
 std::vector<std::string> PresetStore::list() const {
     std::vector<std::string> names;
-    File root = LittleFS.open(kPresetDirectory);
+    File root = fs_->open(kPresetDirectory);
     if (!root || !root.isDirectory()) return names;
     File file = root.openNextFile();
     while (file) {

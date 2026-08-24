@@ -47,8 +47,16 @@ This project intentionally preserves the known-good configuration from the exist
 | RGB order | BGR |
 | Rotation | 0, portrait |
 | Calibration | `{275, 3620, 264, 3532, 4}` |
+| SD card SPI bus | VSPI (default pins, separate from the TFT/touch HSPI bus) |
+| SD CS | 5 |
+| SD MOSI | 23 |
+| SD MISO | 19 |
+| SD SCK | 18 |
+| Battery ADC | 34, 2:1 resistor divider (no fuel-gauge IC) |
 
 `USE_HSPI_PORT` is required. Removing it moves TFT_eSPI to the wrong SPI bus and can make touch/display behavior fail on this module.
+
+The onboard microSD slot and battery-voltage sense pin are hardware-validated (SD detected/mounted and a plausible battery voltage read on both project boards); see [SdCardStore](include/SdCardStore.h) and [BatteryMonitor](include/BatteryMonitor.h). Store-presets-on-SD and show-battery-% are both on-screen Settings/Storage toggles, off and on by default respectively.
 
 ## Quick start on Windows
 

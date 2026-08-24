@@ -53,6 +53,11 @@ void setup() {
         Serial.printf("{\"event\":\"fatal\",\"message\":\"%s\"}\n", error.c_str());
         return;
     }
+    Serial.printf(
+        "{\"event\":\"storage_ready\",\"sd_mounted\":%s,\"presets_on_sd\":%s,\"battery_percent\":%u,"
+        "\"battery_voltage\":%.2f}\n",
+        application.sdCardMounted() ? "true" : "false", application.presetsUseSd() ? "true" : "false",
+        application.batteryPercent(), static_cast<double>(application.batteryVoltage()));
 
     // One-time boot self-test for the mbedTLS-backed trust crypto module (Task 4): proves
     // keygen/sign/verify/ECDH/HKDF actually work on this build before anything (Tasks 6-8)
