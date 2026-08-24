@@ -103,6 +103,10 @@ void setup() {
 }
 
 void loop() {
+    // Any byte arriving on the USB line counts as activity for the backlight-inactivity timer,
+    // regardless of which serial transport (legacy or COBS v2) ends up consuming it below.
+    if (Serial.available() > 0) application.noteActivity();
+
     if (active == ActiveTransport::Legacy) {
         legacyEndpoint.loop();
         // Gateway mode can be requested either by a connected host (legacy "gateway" USB command)

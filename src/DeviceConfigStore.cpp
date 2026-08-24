@@ -43,6 +43,8 @@ bool DeviceConfigStore::load() {
     darkTheme_ = document["dark_theme"] | true;
     sdCardStorageEnabled_ = document["sd_card_storage"] | false;
     showBatteryPercent_ = document["show_battery_percent"] | true;
+    backlightTimeoutPluggedInSec_ = document["backlight_timeout_plugged_in_sec"] | 300;
+    backlightTimeoutBatterySec_ = document["backlight_timeout_battery_sec"] | 30;
     return true;
 }
 
@@ -54,6 +56,8 @@ bool DeviceConfigStore::save(std::string& error) const {
     document["dark_theme"] = darkTheme_;
     document["sd_card_storage"] = sdCardStorageEnabled_;
     document["show_battery_percent"] = showBatteryPercent_;
+    document["backlight_timeout_plugged_in_sec"] = backlightTimeoutPluggedInSec_;
+    document["backlight_timeout_battery_sec"] = backlightTimeoutBatterySec_;
 
     File file = LittleFS.open(kConfigPath, "w");
     if (!file) {
@@ -108,6 +112,26 @@ bool DeviceConfigStore::setShowBatteryPercent(bool value, std::string& error) {
     showBatteryPercent_ = value;
     if (!save(error)) {
         showBatteryPercent_ = previous;
+        return false;
+    }
+    return true;
+}
+
+bool DeviceConfigStore::setBacklightTimeoutPluggedInSec(uint32_t value, std::string& error) {
+    const uint32_t previous = backlightTimeoutPluggedInSec_;
+    backlightTimeoutPluggedInSec_ = value;
+    if (!save(error)) {
+        backlightTimeoutPluggedInSec_ = previous;
+        return false;
+    }
+    return true;
+}
+
+bool DeviceConfigStore::setBacklightTimeoutBatterySec(uint32_t value, std::string& error) {
+    const uint32_t previous = backlightTimeoutBatterySec_;
+    backlightTimeoutBatterySec_ = value;
+    if (!save(error)) {
+        backlightTimeoutBatterySec_ = previous;
         return false;
     }
     return true;

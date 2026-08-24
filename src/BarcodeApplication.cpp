@@ -13,10 +13,13 @@
 #include <utility>
 #include <vector>
 
+#include "BacklightTimeout.h"
 #include "RandomPayload.h"
 #include "app_config.h"
 
 using namespace espbarcode;
+using esplink::formatBacklightTimeout;
+using esplink::nextBacklightTimeoutPreset;
 using esplink::OrientationTarget;
 using esplink::ScreenOrientation;
 using uigeom::Theme;
@@ -493,14 +496,14 @@ int16_t settingsContentBottomY(uint16_t width, const Rect& card, bool gatewayMod
     return static_cast<int16_t>(linkRow.y + linkRow.h);
 }
 
-// Trust and Storage side by side (rather than one full-width button) -- the +6 gap here
-// (vs. the +12/+10 used elsewhere on this screen) is what keeps the stack clear of
+// Trust, Storage, and Power side by side (rather than one full-width button each) -- the +6 gap
+// here (vs. the +12/+10 used elsewhere on this screen) is what keeps the stack clear of
 // settingsGatewayModeButtonRect's bottom anchor on the shortest supported (landscape,
 // 480x320) height now that the card above has grown by a row.
-std::array<Rect, 2> settingsNavButtons(uint16_t width, const Rect& card, bool gatewayModeActive) {
+std::array<Rect, 3> settingsNavButtons(uint16_t width, const Rect& card, bool gatewayModeActive) {
     const int16_t y = static_cast<int16_t>(settingsContentBottomY(width, card, gatewayModeActive) + 6);
-    const auto row = distributeRow(width, y, 36, 2);
-    return {row[0], row[1]};
+    const auto row = distributeRow(width, y, 36, 3);
+    return {row[0], row[1], row[2]};
 }
 
 // Bottom-anchored (rather than stacked below the Trust button) so it never collides with the
@@ -587,7 +590,8 @@ std::string BarcodeApplication::symbologyHint(Symbology type) {
 
 bool BarcodeApplication::begin(std::string& error) {
     pinMode(app_config::kBacklightPin, OUTPUT);
-    digitalWrite(app_config::kBacklightPin, HIGH);
+    setBacklight(true);
+    lastActivityAt_ = millis();
 
     tft_.init();
     if (!config_.begin(error)) return false;
@@ -623,10 +627,26 @@ bool BarcodeApplication::begin(std::string& error) {
 void BarcodeApplication::loop() {
     pollTouch();
     pollBattery();
+    pollInactivity();
 }
 
 void BarcodeApplication::setBacklight(bool on) {
+    backlightOn_ = on;
     digitalWrite(app_config::kBacklightPin, on ? HIGH : LOW);
+}
+
+void BarcodeApplication::noteActivity() {
+    lastActivityAt_ = millis();
+    if (!backlightOn_) setBacklight(true);
+}
+
+void BarcodeApplication::pollInactivity() {
+    if (!backlightOn_) return;
+    const bool onBattery = !BatteryMonitor::likelyExternalPower(batteryVoltage_);
+    const uint32_t timeoutSec =
+        onBattery ? config_.backlightTimeoutBatterySec() : config_.backlightTimeoutPluggedInSec();
+    if (timeoutSec == 0) return;  // 0 = never dim for this power state
+    if (millis() - lastActivityAt_ >= timeoutSec * 1000UL) setBacklight(false);
 }
 
 void BarcodeApplication::setOrientation(OrientationTarget target, ScreenOrientation value) {
@@ -664,6 +684,7 @@ void BarcodeApplication::redrawView(View view) {
         case View::Gateway: drawGateway(); break;
         case View::Trust: drawTrust(); break;
         case View::Storage: drawStorage(); break;
+        case View::Power: drawPower(); break;
         case View::Barcode: break;  // always white/black regardless of theme; nothing to restyle
     }
 }
@@ -685,7 +706,15 @@ void BarcodeApplication::pollTouch() {
     uint16_t x = 0;
     uint16_t y = 0;
     const bool down = readTouch(x, y);
-    if (down && !touchDown_) handleTouch(x, y);
+    if (down) {
+        // A touch that arrives while the backlight is off is a wake-up tap only -- it's
+        // swallowed rather than dispatched to handleTouch(), the same way a phone's lock
+        // screen eats the tap that turns the display back on, so a blind tap can't also
+        // trigger whatever button happens to be underneath it.
+        const bool wasAsleep = !backlightOn_;
+        noteActivity();
+        if (!touchDown_ && !wasAsleep) handleTouch(x, y);
+    }
     touchDown_ = down;
 }
 
@@ -749,6 +778,7 @@ void BarcodeApplication::handleTouch(uint16_t x, uint16_t y) {
         case View::Gateway: handleGatewayTouch(x, y); break;
         case View::Trust: handleTrustTouch(x, y); break;
         case View::Storage: handleStorageTouch(x, y); break;
+        case View::Power: handlePowerTouch(x, y); break;
         case View::Barcode:
             if (millis() - barcodeShownAt_ >= app_config::kTouchCloseGuardMs) closeBarcode();
             break;
@@ -1710,11 +1740,12 @@ void BarcodeApplication::drawSettings() {
     // running as a plain client, fed by EspNowEndpoint's discovery ping/pong (see main.cpp).
     if (!gatewayModeActive_) drawSettingsLinkStatusRow();
 
-    // "Trust"/"Storage" navigation buttons below whatever else this screen rendered -- same
-    // accent-button shape as drawGatewayHomeBanner's button-to-View::Gateway pattern.
+    // "Trust"/"Storage"/"Power" navigation buttons below whatever else this screen rendered --
+    // same accent-button shape as drawGatewayHomeBanner's button-to-View::Gateway pattern.
     const auto navButtons = settingsNavButtons(width, card, gatewayModeActive_);
     drawButton(navButtons[0], "TRUST", true);
     drawButton(navButtons[1], "STORAGE", true);
+    drawButton(navButtons[2], "POWER", true);
 
     // On-screen entry point into Gateway mode -- previously only reachable via the "gateway" USB
     // command a connected host sends over the legacy serial line (see SerialLegacyEndpoint).
@@ -1767,6 +1798,11 @@ void BarcodeApplication::handleSettingsTouch(uint16_t x, uint16_t y) {
     if (navButtons[1].contains(x, y, kTouchPad)) {
         view_ = View::Storage;
         drawStorage();
+        return;
+    }
+    if (navButtons[2].contains(x, y, kTouchPad)) {
+        view_ = View::Power;
+        drawPower();
         return;
     }
 
@@ -2171,6 +2207,77 @@ void BarcodeApplication::handleStorageTouch(uint16_t x, uint16_t y) {
         setStatus("SD storage save failed: " + error, view_ == View::Home);
     }
     drawStorage();
+}
+
+void BarcodeApplication::drawPower() {
+    applyOrientationForView(View::Power);
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const Theme& th = theme();
+
+    tft_.fillScreen(th.bg);
+    const int16_t contentTop = drawSubHeader("Power");
+
+    const std::array<std::pair<const char*, uint32_t>, 2> rows = {{
+        {"Backlight (Plugged In)", config_.backlightTimeoutPluggedInSec()},
+        {"Backlight (On Battery)", config_.backlightTimeoutBatterySec()},
+    }};
+    const Rect card = settingsRowsCardRect(width, height, contentTop, 2);
+    tft_.fillRoundRect(card.x, card.y, card.w, card.h, 12, th.surface);
+    tft_.drawRoundRect(card.x, card.y, card.w, card.h, 12, th.hairline);
+    const int16_t rowH = static_cast<int16_t>(card.h / 2);
+    for (int row = 0; row < 2; ++row) {
+        const int16_t y = static_cast<int16_t>(card.y + row * rowH);
+        if (row > 0) tft_.drawFastHLine(static_cast<int16_t>(card.x + 2), y, static_cast<int16_t>(card.w - 4), th.hairline);
+        tft_.setTextDatum(ML_DATUM);
+        tft_.setTextColor(th.text, th.surface);
+        tft_.drawString(rows[static_cast<std::size_t>(row)].first, static_cast<int16_t>(card.x + 12), static_cast<int16_t>(y + rowH / 2), 2);
+        tft_.setTextDatum(MR_DATUM);
+        tft_.setTextColor(th.textMuted, th.surface);
+        const std::string label = "<  " + formatBacklightTimeout(rows[static_cast<std::size_t>(row)].second) + "  >";
+        tft_.drawString(label.c_str(), static_cast<int16_t>(card.x + card.w - 14), static_cast<int16_t>(y + rowH / 2), 2);
+    }
+
+    // Live readout of which timeout row pollInactivity() is actually using right now --
+    // BatteryMonitor has no dedicated charge-status pin, so this doubles as a way to see the
+    // heuristic's call on real hardware (see BatteryMonitor::likelyExternalPower).
+    const Rect statusRow = storageStatusRowRect(width, static_cast<int16_t>(card.y + card.h + 12));
+    tft_.fillRoundRect(statusRow.x, statusRow.y, statusRow.w, statusRow.h, 10, th.surface);
+    tft_.drawRoundRect(statusRow.x, statusRow.y, statusRow.w, statusRow.h, 10, th.hairline);
+    const bool external = BatteryMonitor::likelyExternalPower(batteryVoltage_);
+    tft_.fillCircle(static_cast<int16_t>(statusRow.x + 16), static_cast<int16_t>(statusRow.y + statusRow.h / 2), 4,
+                    external ? th.accent : th.textFaint);
+    tft_.setTextDatum(ML_DATUM);
+    tft_.setTextColor(th.text, th.surface);
+    tft_.drawString(external ? "Power: plugged in" : "Power: on battery",
+                    static_cast<int16_t>(statusRow.x + 28), static_cast<int16_t>(statusRow.y + statusRow.h / 2), 1);
+}
+
+void BarcodeApplication::handlePowerTouch(uint16_t x, uint16_t y) {
+    if (handleSubHeaderTouch(x, y, View::Settings)) return;
+    const uint16_t width = tft_.width();
+    const uint16_t height = tft_.height();
+    const int16_t contentTop = subHeaderHeight(width, height);
+    const Rect card = settingsRowsCardRect(width, height, contentTop, 2);
+    if (!card.contains(x, y, 0)) return;
+    const int16_t rowH = static_cast<int16_t>(card.h / 2);
+    const int row = (static_cast<int>(y) - card.y) / rowH;
+    if (row < 0 || row > 1) return;
+
+    const int direction = x < width / 2 ? -1 : 1;
+    std::string error;
+    if (row == 0) {
+        const uint32_t next = nextBacklightTimeoutPreset(config_.backlightTimeoutPluggedInSec(), direction);
+        if (!config_.setBacklightTimeoutPluggedInSec(next, error)) {
+            setStatus("Backlight timeout save failed: " + error, view_ == View::Home);
+        }
+    } else {
+        const uint32_t next = nextBacklightTimeoutPreset(config_.backlightTimeoutBatterySec(), direction);
+        if (!config_.setBacklightTimeoutBatterySec(next, error)) {
+            setStatus("Backlight timeout save failed: " + error, view_ == View::Home);
+        }
+    }
+    drawPower();
 }
 
 bool BarcodeApplication::generate(const BarcodeSpec& spec, bool display, std::string& error) {

@@ -25,12 +25,21 @@ public:
     // subHeader-based screen (see BarcodeApplication::drawBatteryBadge).
     bool showBatteryPercent() const { return showBatteryPercent_; }
 
+    // Screen-off inactivity timeouts (Settings > Power), in seconds -- BarcodeApplication picks
+    // between the two each tick based on BatteryMonitor::likelyExternalPower. 0 means "never
+    // dim" for that power state. See include/BacklightTimeout.h for the preset ladder these
+    // values are drawn from.
+    uint32_t backlightTimeoutPluggedInSec() const { return backlightTimeoutPluggedInSec_; }
+    uint32_t backlightTimeoutBatterySec() const { return backlightTimeoutBatterySec_; }
+
     // Updates the in-memory value and persists it; returns false (leaving the
     // stored value unchanged) only if the write fails.
     bool setOrientation(esplink::OrientationTarget target, esplink::ScreenOrientation value, std::string& error);
     bool setDarkTheme(bool value, std::string& error);
     bool setSdCardStorageEnabled(bool value, std::string& error);
     bool setShowBatteryPercent(bool value, std::string& error);
+    bool setBacklightTimeoutPluggedInSec(uint32_t value, std::string& error);
+    bool setBacklightTimeoutBatterySec(uint32_t value, std::string& error);
 
 private:
     bool load();
@@ -41,4 +50,6 @@ private:
     bool darkTheme_ = true;
     bool sdCardStorageEnabled_ = false;
     bool showBatteryPercent_ = true;
+    uint32_t backlightTimeoutPluggedInSec_ = 300;
+    uint32_t backlightTimeoutBatterySec_ = 30;
 };

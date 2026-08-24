@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <random>
 
+#include "BacklightTimeout.h"
+#include "BatteryMonitor.h"
 #include "EspBarcodeCore.h"
 #include "RandomPayload.h"
 #include "UiRect.h"
@@ -171,19 +173,20 @@ void test_landscape_home_button_layout_has_no_overlaps_and_fits_screen() {
 
 void test_settings_screen_layout_has_no_overlaps_and_fits_landscape_screen() {
     // Mirrors drawSettings()'s landscape (480x320, the tightest supported height) layout
-    // after the Show-Battery-% row (4th card row) and the Trust/Storage nav-button split
-    // were added. This is the tightest fit on the screen -- 2px of slack between the nav
-    // buttons and the red "ENTER GATEWAY MODE" button -- so a regression here is exactly
-    // the kind of overlap a future row addition could reintroduce silently.
+    // after the Show-Battery-% row (4th card row) and the Trust/Storage/Power nav-button
+    // three-way split were added. This is the tightest fit on the screen -- 2px of slack
+    // between the nav buttons and the red "ENTER GATEWAY MODE" button -- so a regression here
+    // is exactly the kind of overlap a future row addition could reintroduce silently.
     constexpr int16_t kScreenWidth = 480;
     constexpr int16_t kScreenHeight = 320;
     static constexpr Rect kCard{8, 34, 464, 160};              // settingsRowsCardRect(...,4)
     static constexpr Rect kLinkRow{8, 206, 464, 28};           // gatewayLinkStatusRowRect
-    static constexpr Rect kTrustButton{8, 240, 228, 36};       // settingsNavButtons()[0]
-    static constexpr Rect kStorageButton{244, 240, 228, 36};   // settingsNavButtons()[1]
+    static constexpr Rect kTrustButton{8, 240, 149, 36};       // settingsNavButtons()[0]
+    static constexpr Rect kStorageButton{165, 240, 149, 36};   // settingsNavButtons()[1]
+    static constexpr Rect kPowerButton{322, 240, 149, 36};     // settingsNavButtons()[2]
     static constexpr Rect kGatewayModeButton{8, 278, 464, 34}; // settingsGatewayModeButtonRect
 
-    static constexpr Rect kRects[] = {kCard, kLinkRow, kTrustButton, kStorageButton, kGatewayModeButton};
+    static constexpr Rect kRects[] = {kCard, kLinkRow, kTrustButton, kStorageButton, kPowerButton, kGatewayModeButton};
     for (const Rect& r : kRects) {
         TEST_ASSERT_TRUE(r.x >= 0);
         TEST_ASSERT_TRUE(r.y >= 0);
@@ -196,6 +199,70 @@ void test_settings_screen_layout_has_no_overlaps_and_fits_landscape_screen() {
             TEST_ASSERT_FALSE_MESSAGE(uigeom::overlaps(kRects[i], kRects[j]), "settings screen rows/buttons overlap");
         }
     }
+}
+
+void test_power_screen_layout_has_no_overlaps_and_fits_landscape_screen() {
+    // Mirrors drawPower()'s landscape (480x320) layout: a 2-row card (Plugged In / On Battery
+    // timeouts) plus the power-source status row below it.
+    constexpr int16_t kScreenWidth = 480;
+    constexpr int16_t kScreenHeight = 320;
+    static constexpr Rect kCard{8, 34, 464, 80};        // settingsRowsCardRect(...,2)
+    static constexpr Rect kStatusRow{8, 126, 464, 28};  // storageStatusRowRect
+
+    static constexpr Rect kRects[] = {kCard, kStatusRow};
+    for (const Rect& r : kRects) {
+        TEST_ASSERT_TRUE(r.x >= 0);
+        TEST_ASSERT_TRUE(r.y >= 0);
+        TEST_ASSERT_TRUE(r.x + r.w <= kScreenWidth);
+        TEST_ASSERT_TRUE(r.y + r.h <= kScreenHeight);
+    }
+    TEST_ASSERT_FALSE_MESSAGE(uigeom::overlaps(kCard, kStatusRow), "power screen card/status row overlap");
+}
+
+void test_backlight_timeout_preset_cycling_saturates_at_ends() {
+    using esplink::kBacklightTimeoutPresetsSec;
+    using esplink::nextBacklightTimeoutPreset;
+
+    // Walking right from 0 (Never) steps through the whole ladder...
+    uint32_t value = 0;
+    for (std::size_t i = 1; i < kBacklightTimeoutPresetsSec.size(); ++i) {
+        value = nextBacklightTimeoutPreset(value, 1);
+        TEST_ASSERT_EQUAL_UINT32(kBacklightTimeoutPresetsSec[i], value);
+    }
+    // ...and one more step past the end holds at the longest timeout instead of wrapping.
+    TEST_ASSERT_EQUAL_UINT32(kBacklightTimeoutPresetsSec.back(), nextBacklightTimeoutPreset(value, 1));
+
+    // Walking left from the longest timeout steps back down...
+    value = kBacklightTimeoutPresetsSec.back();
+    for (std::size_t i = kBacklightTimeoutPresetsSec.size() - 1; i-- > 0;) {
+        value = nextBacklightTimeoutPreset(value, -1);
+        TEST_ASSERT_EQUAL_UINT32(kBacklightTimeoutPresetsSec[i], value);
+    }
+    // ...and one more step past the start holds at 0 (Never) instead of wrapping.
+    TEST_ASSERT_EQUAL_UINT32(0u, nextBacklightTimeoutPreset(value, -1));
+
+    // A value from a foreign/older config that isn't exactly on the ladder still lands
+    // somewhere sane: 45s falls back to 30s, then steps up to 60s.
+    TEST_ASSERT_EQUAL_UINT32(60u, nextBacklightTimeoutPreset(45, 1));
+}
+
+void test_backlight_timeout_formatting() {
+    TEST_ASSERT_EQUAL_STRING("Never", esplink::formatBacklightTimeout(0).c_str());
+    TEST_ASSERT_EQUAL_STRING("15s", esplink::formatBacklightTimeout(15).c_str());
+    TEST_ASSERT_EQUAL_STRING("30s", esplink::formatBacklightTimeout(30).c_str());
+    TEST_ASSERT_EQUAL_STRING("1m", esplink::formatBacklightTimeout(60).c_str());
+    TEST_ASSERT_EQUAL_STRING("5m", esplink::formatBacklightTimeout(300).c_str());
+    TEST_ASSERT_EQUAL_STRING("30m", esplink::formatBacklightTimeout(1800).c_str());
+}
+
+void test_battery_monitor_external_power_heuristic() {
+    // A resting/discharging Li-Po tops out around 4.20V; anything meaningfully above that is
+    // read as an active charge current, i.e. USB power present (see
+    // BatteryMonitor::likelyExternalPower's doc comment for the full rationale).
+    TEST_ASSERT_FALSE(BatteryMonitor::likelyExternalPower(3.70f));
+    TEST_ASSERT_FALSE(BatteryMonitor::likelyExternalPower(4.20f));
+    TEST_ASSERT_TRUE(BatteryMonitor::likelyExternalPower(4.22f));
+    TEST_ASSERT_TRUE(BatteryMonitor::likelyExternalPower(5.00f));
 }
 
 void test_touch_pad_closes_gap_without_crossing_neighbor() {
@@ -518,6 +585,10 @@ int main(int, char**) {
     RUN_TEST(test_home_button_layout_has_no_overlaps_and_fits_screen);
     RUN_TEST(test_landscape_home_button_layout_has_no_overlaps_and_fits_screen);
     RUN_TEST(test_settings_screen_layout_has_no_overlaps_and_fits_landscape_screen);
+    RUN_TEST(test_power_screen_layout_has_no_overlaps_and_fits_landscape_screen);
+    RUN_TEST(test_backlight_timeout_preset_cycling_saturates_at_ends);
+    RUN_TEST(test_backlight_timeout_formatting);
+    RUN_TEST(test_battery_monitor_external_power_heuristic);
     RUN_TEST(test_touch_pad_closes_gap_without_crossing_neighbor);
     RUN_TEST(test_trust_hello_round_trip);
     RUN_TEST(test_trust_store_add_find_forget);

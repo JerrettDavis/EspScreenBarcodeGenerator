@@ -37,6 +37,11 @@ public:
     void closeBarcode();
     void showHome(const std::string& status = {});
     void setBacklight(bool on);
+    // Resets the inactivity clock and wakes the backlight if it was off. Called from every
+    // input channel that counts as "the device is being used": the digitizer (pollTouch), raw
+    // USB serial bytes (main.cpp), and real application commands arriving over any transport
+    // (BarcodeApplicationAdapter) -- see pollInactivity() for the other half of this.
+    void noteActivity();
     // Permanently switches the Home screen into gateway-mode layout (a status banner and a
     // button to the live stats screen) -- mirrors GatewayRelay's one-way mode switch in main.cpp.
     void enterGatewayMode();
@@ -105,7 +110,7 @@ public:
     using Rect = uigeom::Rect;
 
 private:
-    enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcode, Gateway, Trust, Storage };
+    enum class View : uint8_t { Home, TypePicker, Options, Presets, Settings, Barcode, Gateway, Trust, Storage, Power };
     enum class KeyboardPage : uint8_t { Upper, Lower, Numeric, Symbols };
 
     void pollTouch();
@@ -120,6 +125,7 @@ private:
     void handleGatewayTouch(uint16_t x, uint16_t y);
     void handleTrustTouch(uint16_t x, uint16_t y);
     void handleStorageTouch(uint16_t x, uint16_t y);
+    void handlePowerTouch(uint16_t x, uint16_t y);
     void rebootDevice();
 
     void applyOrientationForView(View view);
@@ -141,6 +147,13 @@ private:
     // partial-redraw pattern as drawSettingsLinkStatusRow, fed by pollBattery()'s periodic
     // refresh so it doesn't fillScreen() the whole Storage view once per tick.
     void drawStorageBatteryRow();
+    // Settings > Power: cycles the plugged-in/on-battery backlight-timeout presets and shows
+    // which power state pollInactivity() currently thinks the board is in.
+    void drawPower();
+    // Turns the backlight off once lastActivityAt_ is older than whichever timeout applies to
+    // the current power state (config_.backlightTimeout{PluggedIn,Battery}Sec, picked via
+    // BatteryMonitor::likelyExternalPower); a 0 timeout disables auto-dim for that state.
+    void pollInactivity();
     // Draws the small battery icon+percent badge at `rect` -- called from drawHome() and
     // drawSubHeader() (so it appears on every screen) as well as pollBattery()'s periodic
     // partial refresh. No-op when config_.showBatteryPercent() is false.
@@ -210,6 +223,8 @@ private:
     uint32_t barcodeShownAt_ = 0;
     uint32_t lastTouchPoll_ = 0;
     bool touchDown_ = false;
+    bool backlightOn_ = true;
+    uint32_t lastActivityAt_ = 0;
     std::size_t presetPage_ = 0;
     bool presetDeleteMode_ = false;
 
