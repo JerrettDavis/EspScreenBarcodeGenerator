@@ -3,11 +3,14 @@
 [![Firmware CI](https://github.com/JerrettDavis/EspScreenBarcodeGenerator/actions/workflows/firmware-ci.yml/badge.svg)](https://github.com/JerrettDavis/EspScreenBarcodeGenerator/actions/workflows/firmware-ci.yml)
 [![.NET CI](https://github.com/JerrettDavis/EspScreenBarcodeGenerator/actions/workflows/dotnet-ci.yml/badge.svg)](https://github.com/JerrettDavis/EspScreenBarcodeGenerator/actions/workflows/dotnet-ci.yml)
 [![CodeQL](https://github.com/JerrettDavis/EspScreenBarcodeGenerator/actions/workflows/codeql.yml/badge.svg)](https://github.com/JerrettDavis/EspScreenBarcodeGenerator/actions/workflows/codeql.yml)
+[![GitHub Pages](https://github.com/JerrettDavis/EspScreenBarcodeGenerator/actions/workflows/pages.yml/badge.svg)](https://github.com/JerrettDavis/EspScreenBarcodeGenerator/actions/workflows/pages.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A standalone and USB-orchestrated barcode laboratory utility for the Hosyond 3.5-inch 320x480 ESP32 display based on the ESP32-WROOM-32E, ST7796U TFT, and XPT2046 resistive touch controller.
 
 The firmware generates barcode module patterns on the ESP32, renders them directly to the TFT with integer-sized pixels, stores reusable presets in LittleFS, and accepts newline-delimited JSON commands over the board's USB-to-UART connection. A full touch keyboard lets the device work without a computer.
+
+After flashing, open the hosted [ESP Barcode Control web app](https://jerrettdavis.github.io/EspScreenBarcodeGenerator/) in Chrome or Edge to connect over Bluetooth or USB serial and control one or more screens.
 
 Version: **0.1.0**  
 Protocol: **1.0**

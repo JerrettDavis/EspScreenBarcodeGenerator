@@ -1,0 +1,80 @@
+name: Deploy web controller to GitHub Pages
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "dotnet/src/EspBarcode.Controller.Web/**"
+      - "dotnet/src/EspBarcode.Connectivity/**"
+      - "dotnet/src/EspBarcode.Protocol/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_NOLOGO: true
+  PAGES_BASE_PATH: /EspScreenBarcodeGenerator/
+
+jobs:
+  build:
+    name: Build Pages artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Publish web controller
+        run: >-
+          dotnet publish
+          dotnet/src/EspBarcode.Controller.Web/EspBarcode.Controller.Web.csproj
+          --configuration Release
+          --output .build/pages
+
+      - name: Configure project-site paths and SPA fallback
+        shell: pwsh
+        run: |
+          $indexPath = ".build/pages/wwwroot/index.html"
+          $index = Get-Content -LiteralPath $indexPath -Raw
+          $index = $index.Replace('<base href="/" />', '<base href="${{ env.PAGES_BASE_PATH }}" />')
+          if ($index -notmatch [regex]::Escape('<base href="${{ env.PAGES_BASE_PATH }}" />')) {
+            throw "Could not configure the GitHub Pages base path."
+          }
+          Set-Content -LiteralPath $indexPath -Value $index -NoNewline
+          Copy-Item -LiteralPath $indexPath -Destination ".build/pages/wwwroot/404.html"
+          New-Item -ItemType File -Path ".build/pages/wwwroot/.nojekyll" -Force
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: .build/pages/wwwroot
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

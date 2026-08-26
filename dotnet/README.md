@@ -170,6 +170,8 @@ that), plus the EspLink v2 subset a gateway-mode board relays
 (`system.hello`/`barcode.generate`) via the existing carrier-agnostic
 `EspBarcode.Protocol`/`EspBarcode.Connectivity` libraries.
 
+The production build is hosted at [ESP Barcode Control](https://jerrettdavis.github.io/EspScreenBarcodeGenerator/).
+
 ```powershell
 dotnet run --project src/EspBarcode.Controller.Web
 ```
