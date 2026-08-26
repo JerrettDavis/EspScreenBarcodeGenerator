@@ -40,6 +40,128 @@ html, body {
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
+/* ---- pre-Blazor PWA loading shell ---- */
+
+html {
+  --loader-bg: #0b0c0e;
+  --loader-surface: #131519;
+  --loader-screen: #1b1e23;
+  --loader-hairline: #262a30;
+  --loader-text: #f5f6f7;
+  --loader-muted: #9098a0;
+  --loader-accent: #2dd9c6;
+  color-scheme: dark;
+  background: var(--loader-bg);
+}
+
+html[data-esb-theme="light"] {
+  --loader-bg: #f4f5f6;
+  --loader-surface: #ffffff;
+  --loader-screen: #ecedef;
+  --loader-hairline: #dee0e3;
+  --loader-text: #16181b;
+  --loader-muted: #6b7078;
+  --loader-accent: #0c8c82;
+  color-scheme: light;
+}
+
+.esb-loader {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  overflow: hidden;
+  color: var(--loader-text);
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--loader-accent) 10%, transparent), transparent 38%),
+    var(--loader-bg);
+}
+
+.esb-loader-card {
+  width: min(100%, 340px);
+  padding: 22px;
+  border: 1px solid var(--loader-hairline);
+  border-radius: 16px;
+  background: var(--loader-surface);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+}
+
+html[data-esb-theme="light"] .esb-loader-card { box-shadow: 0 18px 60px rgba(16, 18, 20, 0.12); }
+
+.esb-loader-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.esb-loader-dot {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--loader-accent);
+  box-shadow: 0 0 10px var(--loader-accent);
+}
+
+.esb-loader-screen {
+  position: relative;
+  height: 150px;
+  overflow: hidden;
+  border: 1px solid var(--loader-hairline);
+  border-radius: 10px;
+  background: var(--loader-screen);
+}
+
+.esb-loader-barcode {
+  position: absolute;
+  inset: 30px 42px;
+  opacity: 0.9;
+  background: repeating-linear-gradient(90deg,
+    var(--loader-text) 0 3px, transparent 3px 6px,
+    var(--loader-text) 6px 8px, transparent 8px 13px,
+    var(--loader-text) 13px 18px, transparent 18px 21px);
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+
+.esb-loader-scanline {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 28px;
+  height: 2px;
+  background: var(--loader-accent);
+  box-shadow: 0 0 12px 2px var(--loader-accent);
+  animation: esb-loader-scan 1.8s ease-in-out infinite alternate;
+}
+
+.esb-loader-corners { position: absolute; inset: 18px; border: 1px solid color-mix(in srgb, var(--loader-accent) 45%, transparent); border-left-color: transparent; border-right-color: transparent; }
+
+.esb-loader-copy { display: flex; flex-direction: column; gap: 4px; margin: 18px 0 14px; }
+.esb-loader-copy strong { font-size: 1rem; }
+.esb-loader-copy span { color: var(--loader-muted); font-size: 0.82rem; }
+
+.loading-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--loader-screen);
+}
+
+.loading-progress span { display: block; width: var(--blazor-load-percentage, 0%); height: 100%; border-radius: inherit; background: var(--loader-accent); transition: width 0.15s ease-out; }
+.loading-progress-text { min-height: 1em; margin-top: 7px; color: var(--loader-muted); font-size: 0.72rem; text-align: right; }
+.loading-progress-text::after { content: var(--blazor-load-percentage-text, "Loading"); }
+
+@keyframes esb-loader-scan { from { transform: translateY(0); } to { transform: translateY(92px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .esb-loader-scanline { animation: none; transform: translateY(46px); }
+  .loading-progress span { transition: none; }
+}
+
 .esb-app {
   min-height: 100vh;
   background: var(--esb-bg);

@@ -14,3 +14,13 @@ Feature: Theme
     Then the app theme is "light"
     When I reload the app
     Then the app theme is "light"
+
+  Scenario Outline: Startup loader matches the saved theme before Blazor boots
+    Given the PWA startup loader is held open with the "<theme>" theme
+    Then the startup loader uses the "<theme>" product palette
+    And the startup loader presents the barcode controller brand
+
+    Examples:
+      | theme |
+      | dark  |
+      | light |

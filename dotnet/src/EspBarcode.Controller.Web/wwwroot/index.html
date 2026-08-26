@@ -11,6 +11,16 @@
     <link rel="preload" id="webassembly" />
     <link rel="stylesheet" href="css/app.css" />
     <link rel="manifest" href="manifest.webmanifest" />
+    <script>
+        (() => {
+            let theme = 'dark';
+            try {
+                theme = JSON.parse(localStorage.getItem('esp-controller.theme')) === 'light' ? 'light' : 'dark';
+            } catch { /* Storage can be unavailable in private or locked-down contexts. */ }
+            document.documentElement.dataset.esbTheme = theme;
+            document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f4f5f6' : '#0b0c0e';
+        })();
+    </script>
     <!-- If you add any scoped CSS files, uncomment the following to load them
     <link href="EspBarcode.Controller.Web.styles.css" rel="stylesheet" /> -->
     <script type="importmap"></script>
@@ -18,11 +28,22 @@
 
 <body>
     <div id="app">
-        <svg class="loading-progress">
-            <circle r="40%" cx="50%" cy="50%" />
-            <circle r="40%" cx="50%" cy="50%" />
-        </svg>
-        <div class="loading-progress-text"></div>
+        <main class="esb-loader" role="status" aria-live="polite" aria-label="Loading ESP Barcode Control">
+            <div class="esb-loader-card">
+                <div class="esb-loader-brand"><span class="esb-loader-dot"></span>ESP Barcode Control</div>
+                <div class="esb-loader-screen" aria-hidden="true">
+                    <div class="esb-loader-barcode"></div>
+                    <div class="esb-loader-scanline"></div>
+                    <div class="esb-loader-corners"></div>
+                </div>
+                <div class="esb-loader-copy">
+                    <strong>Starting controller</strong>
+                    <span>Preparing nearby screen controls…</span>
+                </div>
+                <div class="loading-progress" aria-hidden="true"><span></span></div>
+                <div class="loading-progress-text"></div>
+            </div>
+        </main>
     </div>
 
     <div id="blazor-error-ui">
