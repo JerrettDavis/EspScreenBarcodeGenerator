@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject ThemeService Theme
 @inject DeviceRegistry Devices
+@inject BluetoothDeviceRegistry Bluetooth
 
 <PageTitle>Settings - ESP Barcode Control</PageTitle>
 
@@ -22,10 +23,11 @@
     <h2>About</h2>
     <table class="esb-table">
         <tbody>
-        <tr><td>Transport</td><td>Web Serial API, 115200 baud (matches <code>docs/PROTOCOL.md</code>)</td></tr>
-        <tr><td>Control protocols</td><td>NDJSON v1 (full command set) + EspLink v2 over gateway relay (<code>system.hello</code>, <code>barcode.generate</code>)</td></tr>
-        <tr><td>Browser support</td><td>Chromium-based browsers only (Chrome, Edge) — Web Serial is not implemented in Firefox/Safari</td></tr>
-        <tr><td>Connected devices</td><td>@Devices.Devices.Count</td></tr>
+        <tr><td>Transport</td><td>Bluetooth LE GATT, Web Serial at 115200 baud, and USB-to-ESP-NOW gateway relay</td></tr>
+        <tr><td>Control protocols</td><td>EspLink v2 over BLE/gateway plus NDJSON v1 over direct serial</td></tr>
+        <tr><td>Mobile support</td><td>Chrome on Android over HTTPS. Web Bluetooth is unavailable in iOS browsers; Safari and Firefox are not supported.</td></tr>
+        <tr><td>Security</td><td>The current firmware accepts any nearby BLE central. Use only in a controlled lab until authenticated device trust is enabled.</td></tr>
+        <tr><td>Connected devices</td><td>@(Devices.Devices.Count + Bluetooth.Devices.Count)</td></tr>
         </tbody>
     </table>
 </div>

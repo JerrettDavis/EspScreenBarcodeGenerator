@@ -32,7 +32,13 @@ public sealed class SerialPortTransport : IEspBarcodeTransport
         // Give the firmware time to reboot and mount its filesystem before
         // the caller's first request lands, and drop whatever boot chatter
         // arrived meanwhile.
-        Thread.Sleep(1500);
+        // The current full firmware (BLE + ESP-NOW + LittleFS + TFT) needs just over 1.5s
+        // on the two production CH340 boards measured during the mobile-controller hardware
+        // acceptance pass. A command sent at the old 1.5s boundary was silently lost on both
+        // cold boots, making the one-way gateway handshake appear to fail. Keep margin here:
+        // unlike a retry, waiting before the first command cannot accidentally send NDJSON
+        // after the device has already switched to COBS framing.
+        Thread.Sleep(2500);
         _port.DiscardInBuffer();
     }
 

@@ -25,9 +25,10 @@ try {
         $Generator = @("-G", "Ninja")
     }
 
+    $SanitizerArgument = "-DESPBARCODE_ENABLE_SANITIZERS=$Sanitizers"
     & cmake -S $Root -B $BuildDirectory @Generator `
         -DCMAKE_BUILD_TYPE=Debug `
-        -DESPBARCODE_ENABLE_SANITIZERS=$Sanitizers
+        $SanitizerArgument
     if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
 
     & cmake --build $BuildDirectory --parallel

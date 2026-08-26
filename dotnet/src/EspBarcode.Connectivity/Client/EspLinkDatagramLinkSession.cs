@@ -12,13 +12,13 @@ namespace EspBarcode.Connectivity.Client;
 /// mirror-image contract: one write/notify per hop frame.
 /// </summary>
 public sealed class EspLinkDatagramLinkSession(ILinkConnection connection, uint linkSessionId, int maxFrameBytes)
-    : IAsyncDisposable
+    : IMessageLinkSession
 {
     private readonly FrameAssembler _assembler = new();
     private uint _linkMessageCounter = 1;
 
     public async Task SendMessageAsync(byte[] layer3Message, TrafficClass trafficClass, CarrierProfileId profileId,
-                                       CancellationToken cancellationToken)
+                                       CancellationToken cancellationToken, ushort routeId = 0)
     {
         int maxPayload = maxFrameBytes - HopFrameHeader.Overhead;
         if (maxPayload <= 0)
@@ -38,6 +38,7 @@ public sealed class EspLinkDatagramLinkSession(ILinkConnection connection, uint 
             {
                 TrafficClass = trafficClass,
                 ProfileId = profileId,
+                RouteId = routeId,
                 LinkSessionId = linkSessionId,
                 LinkMessageId = linkMessageId,
                 FragmentIndex = (ushort)i,

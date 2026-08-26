@@ -17,7 +17,7 @@ namespace EspBarcode.Controller.Web.Services;
 public sealed class GatewayLinkClient : IAsyncDisposable
 {
     private const string Schema = "esbg.control/2.0";
-    private readonly EspLinkLinkSession _linkSession;
+    private readonly IMessageLinkSession _linkSession;
     private readonly EspLinkControlSession _controlSession;
 
     public GatewayLinkClient(WebSerialConnection connection, uint linkSessionId = 1)
@@ -27,18 +27,26 @@ public sealed class GatewayLinkClient : IAsyncDisposable
         _controlSession.Start();
     }
 
+    public GatewayLinkClient(ILinkConnection connection, uint linkSessionId, int maxFrameBytes)
+    {
+        _linkSession = new EspLinkDatagramLinkSession(connection, linkSessionId, maxFrameBytes);
+        _controlSession = new EspLinkControlSession(_linkSession, CarrierProfileId.BleGattV1);
+        _controlSession.Start();
+    }
+
     private Task<JsonObject> SendAsync(
-        string name, JsonObject? body, uint controlSessionId, TimeSpan timeout, CancellationToken cancellationToken)
-        => SendAsync(ServiceId.System, name, body, controlSessionId, timeout, cancellationToken);
+        string name, JsonObject? body, uint controlSessionId, TimeSpan timeout, CancellationToken cancellationToken,
+        ushort routeId = 0)
+        => SendAsync(ServiceId.System, name, body, controlSessionId, timeout, cancellationToken, routeId);
 
     private async Task<JsonObject> SendAsync(
         ServiceId serviceId, string name, JsonObject? body, uint controlSessionId, TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, ushort routeId = 0)
     {
         var wrapper = new JsonObject { ["schema"] = Schema, ["name"] = name, ["body"] = body ?? new JsonObject() };
         var bytes = Encoding.UTF8.GetBytes(wrapper.ToJsonString());
         var (envelope, respBytes) = await _controlSession.SendCommandAsync(
-            serviceId, bytes, controlSessionId, timeout, cancellationToken);
+            serviceId, bytes, controlSessionId, timeout, cancellationToken, routeId);
 
         var respText = Encoding.UTF8.GetString(respBytes);
         if (JsonNode.Parse(respText) is not JsonObject respWrapper)
@@ -71,7 +79,8 @@ public sealed class GatewayLinkClient : IAsyncDisposable
     }
 
     public async Task<GenerateResult> GenerateAsync(
-        GenerateOptions options, uint controlSessionId, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        GenerateOptions options, uint controlSessionId, TimeSpan? timeout = null,
+        CancellationToken cancellationToken = default, ushort routeId = 0)
     {
         var body = new JsonObject
         {
@@ -91,7 +100,7 @@ public sealed class GatewayLinkClient : IAsyncDisposable
             ["aztec_layers"] = options.AztecLayers,
         };
 
-        var r = await SendAsync("barcode.generate", body, controlSessionId, timeout ?? TimeSpan.FromSeconds(8), cancellationToken);
+        var r = await SendAsync("barcode.generate", body, controlSessionId, timeout ?? TimeSpan.FromSeconds(8), cancellationToken, routeId);
         return new GenerateResult(
             r["type"]!.GetValue<string>(), r["width"]!.GetValue<int>(), r["height"]!.GetValue<int>(),
             r["linear"]!.GetValue<bool>(), r["quiet"]!.GetValue<int>(), r["displayed"]!.GetValue<bool>(),

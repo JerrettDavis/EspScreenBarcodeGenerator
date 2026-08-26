@@ -5,13 +5,15 @@ namespace EspBarcode.Connectivity.Client;
 
 public sealed class EspLinkControlSession : IAsyncDisposable
 {
-    private readonly EspLinkLinkSession _linkSession;
+    private readonly IMessageLinkSession _linkSession;
+    private readonly CarrierProfileId _profileId;
     private readonly ConcurrentDictionary<ulong, TaskCompletionSource<(MessageEnvelope Envelope, byte[] Body)>> _pending = new();
     private readonly CancellationTokenSource _cts = new();
     private Task? _receiveLoop;
     private ulong _nextOperationId = 1;
 
-    public EspLinkControlSession(EspLinkLinkSession linkSession) => _linkSession = linkSession;
+    public EspLinkControlSession(IMessageLinkSession linkSession, CarrierProfileId profileId = CarrierProfileId.StreamStandard)
+        => (_linkSession, _profileId) = (linkSession, profileId);
 
     public void Start()
     {
@@ -35,7 +37,8 @@ public sealed class EspLinkControlSession : IAsyncDisposable
     }
 
     public async Task<(MessageEnvelope Envelope, byte[] Body)> SendCommandAsync(
-        ServiceId serviceId, byte[] body, uint controlSessionId, TimeSpan timeout, CancellationToken cancellationToken)
+        ServiceId serviceId, byte[] body, uint controlSessionId, TimeSpan timeout, CancellationToken cancellationToken,
+        ushort routeId = 0)
     {
         ulong operationId = _nextOperationId++;
         var envelope = new MessageEnvelope
@@ -54,7 +57,7 @@ public sealed class EspLinkControlSession : IAsyncDisposable
 
         try
         {
-            await _linkSession.SendMessageAsync(message, TrafficClass.Control, CarrierProfileId.StreamStandard, cancellationToken);
+            await _linkSession.SendMessageAsync(message, TrafficClass.Control, _profileId, cancellationToken, routeId);
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(timeout);

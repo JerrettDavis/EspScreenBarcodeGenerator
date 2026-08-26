@@ -3,19 +3,20 @@ using EspBarcode.Protocol;
 
 namespace EspBarcode.Connectivity.Client;
 
-public sealed class EspLinkLinkSession(ILinkConnection connection, uint linkSessionId) : IAsyncDisposable
+public sealed class EspLinkLinkSession(ILinkConnection connection, uint linkSessionId) : IMessageLinkSession
 {
     private readonly FrameAssembler _assembler = new();
     private readonly List<byte> _rxBlock = [];
     private uint _linkMessageCounter = 1;
 
     public async Task SendMessageAsync(byte[] layer3Message, TrafficClass trafficClass, CarrierProfileId profileId,
-                                       CancellationToken cancellationToken)
+                                       CancellationToken cancellationToken, ushort routeId = 0)
     {
         var header = new HopFrameHeader
         {
-            TrafficClass = trafficClass,
-            ProfileId = profileId,
+                TrafficClass = trafficClass,
+                ProfileId = profileId,
+                RouteId = routeId,
             LinkSessionId = linkSessionId,
             LinkMessageId = _linkMessageCounter++,
             FragmentIndex = 0,

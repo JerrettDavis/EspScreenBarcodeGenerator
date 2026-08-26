@@ -44,7 +44,11 @@ class EspBarcodeClient:
         self.serial = serial.Serial(port=port, baudrate=baud, timeout=0.15, write_timeout=timeout)
         self.timeout = timeout
         self._next_id = 1
-        time.sleep(0.15)
+        # Opening the CH340 toggles DTR/RTS and resets the ESP32. The full firmware's
+        # measured cold boot (TFT, LittleFS, BLE, ESP-NOW) exceeds 1.5 seconds on both
+        # supported lab boards; sending during that window is silently lost. Match the
+        # .NET transport's conservative boot margin before discarding boot chatter.
+        time.sleep(2.5)
         self.serial.reset_input_buffer()
 
     def close(self) -> None:

@@ -1,0 +1,108 @@
+@page "/wireless"
+@implements IDisposable
+@inject BluetoothDeviceRegistry Bluetooth
+@inject BarcodeImportService Importer
+@inject DeviceRegistry Wired
+
+<PageTitle>Wireless - ESP Barcode Control</PageTitle>
+<h1>Nearby Screens</h1>
+
+<div class="esb-mobile-stack">
+    <section class="esb-card">
+        <h2>1. Connect</h2>
+        <p class="esb-muted">Choose each nearby ESP display. Bluetooth requires Chrome on Android or desktop and an HTTPS connection.</p>
+        @if (!_supported) { <div class="esb-alert esb-alert-error" data-testid="ble-unsupported">Web Bluetooth is unavailable in this browser.</div> }
+        <button class="esb-btn esb-btn-primary esb-mobile-action" disabled="@(!_supported || _busy)" @onclick="ConnectAsync" data-testid="connect-bluetooth">+ Add Bluetooth Screen</button>
+        @if (Wired.Devices.Any(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay))
+        {
+            <button class="esb-btn esb-mobile-action" disabled="@_busy" @onclick="RefreshGatewayTargetsAsync" data-testid="refresh-gateway-targets">Refresh Paired Gateway Screens</button>
+        }
+        @foreach (var device in Bluetooth.Devices)
+        {
+            <div class="esb-device-row" data-testid="bluetooth-device">
+                <label class="esb-checkbox"><input type="checkbox" checked="@_targets.Contains(device.Id)" @onchange="e => Toggle(device.Id, (bool)e.Value!)" /> <strong>@device.Name</strong></label>
+                <span class="esb-faint">firmware @device.Firmware</span>
+                <button class="esb-btn esb-btn-sm esb-btn-danger" @onclick="() => DisconnectAsync(device)">Disconnect</button>
+            </div>
+        }
+        @foreach (var device in Wired.Devices.Where(d => d.IsConnected))
+        {
+            var targetId = $"wired:{device.Id}";
+            <div class="esb-device-row" data-testid="wired-target">
+                <label class="esb-checkbox"><input type="checkbox" checked="@_targets.Contains(targetId)" @onchange="e => Toggle(targetId, (bool)e.Value!)" /> <strong>@device.Nickname</strong></label>
+                <span class="esb-faint">@(device.Mode == DeviceMode.GatewayRelay ? "ESP-NOW screens through gateway" : "USB serial screen")</span>
+                <span class="esb-badge @(device.Mode == DeviceMode.GatewayRelay ? "esb-badge-warn" : "esb-badge-ok")">@(device.Mode == DeviceMode.GatewayRelay ? "Gateway" : "Wired")</span>
+            </div>
+            @if (device.Mode == DeviceMode.GatewayRelay && _gatewayTargets.GetValueOrDefault(device.Id) is { } peers)
+            {
+                @foreach (var peer in peers)
+                {
+                    var peerTargetId = $"peer:{device.Id}:{peer.RouteId}";
+                    <div class="esb-device-row esb-peer-target" data-testid="gateway-peer-target">
+                        <label class="esb-checkbox"><input type="checkbox" checked="@_targets.Contains(peerTargetId)" @onchange="e => Toggle(peerTargetId, (bool)e.Value!)" /> <strong>@(string.IsNullOrWhiteSpace(peer.Label) ? peer.Fingerprint : peer.Label)</strong></label>
+                        <span class="esb-faint">@peer.Mac · route @peer.RouteId via @device.Nickname</span>
+                        <span class="esb-badge esb-badge-ok">Paired</span>
+                    </div>
+                }
+            }
+        }
+    </section>
+
+    <section class="esb-card">
+        <h2>2. Barcode</h2>
+        <div class="esb-field"><label>Import from photo</label><input @ref="_imageInput" type="file" accept="image/*" capture="environment" data-testid="barcode-photo" /><button class="esb-btn" disabled="@(!_importSupported || _busy)" @onclick="DecodeAsync" data-testid="decode-photo">Read Barcode Photo</button></div>
+        <div class="esb-form-row">
+            <div class="esb-field"><label>Type</label><select class="esb-select" @bind="_options.Type" data-testid="wireless-type">@foreach (var kind in BarcodeKindExtensions.All) { <option value="@kind">@kind.DisplayName()</option> }</select></div>
+            <div class="esb-field"><label>QR ECC</label><select class="esb-select" @bind="_options.Ecc"><option>L</option><option>M</option><option>Q</option><option>H</option></select></div>
+            <div class="esb-field"><label>Rotation</label><select class="esb-select" @bind="_options.Rotation"><option value="auto">Auto</option><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></div>
+        </div>
+        <div class="esb-field"><label>Data</label><textarea class="esb-input" rows="4" @bind="_options.Data" @bind:event="oninput" data-testid="wireless-data"></textarea></div>
+        <div class="esb-form-row">
+            <div class="esb-field"><label>Quiet zone</label><input class="esb-input" type="number" min="-1" @bind="_options.Quiet" /></div>
+            <div class="esb-field"><label>Minimum module pixels</label><input class="esb-input" type="number" min="1" max="8" @bind="_options.MinModule" /></div>
+        </div>
+        @if (_options.Type == BarcodeKind.Qr)
+        {
+            <div class="esb-form-row">
+                <div class="esb-field"><label>QR minimum version</label><input class="esb-input" type="number" min="1" max="40" @bind="_options.QrMinVersion" /></div>
+                <div class="esb-field"><label>QR maximum version</label><input class="esb-input" type="number" min="1" max="40" @bind="_options.QrMaxVersion" /></div>
+            </div>
+        }
+        @if (_options.Type == BarcodeKind.Aztec)
+        {
+            <div class="esb-form-row">
+                <div class="esb-field"><label>Aztec security %</label><input class="esb-input" type="number" @bind="_options.AztecSecurity" /></div>
+                <div class="esb-field"><label>Aztec layers</label><input class="esb-input" type="number" @bind="_options.AztecLayers" /></div>
+            </div>
+        }
+        <div class="esb-form-row">
+            <label class="esb-checkbox"><input type="checkbox" @bind="_options.Invert" /> Invert colors</label>
+            <label class="esb-checkbox"><input type="checkbox" @bind="_options.Rectangular" /> Rectangular Data Matrix</label>
+            <label class="esb-checkbox"><input type="checkbox" @bind="_options.Checksum" /> MSI checksum</label>
+            <label class="esb-checkbox"><input type="checkbox" @bind="_options.Display" /> Display immediately</label>
+        </div>
+    </section>
+
+    <section class="esb-card esb-sticky-action">
+        <h2>3. Send</h2>
+        <p class="esb-muted">@_targets.Count selected screen(s)</p>
+        <button class="esb-btn esb-btn-primary esb-mobile-action" disabled="@(_busy || _targets.Count == 0 || string.IsNullOrWhiteSpace(_options.Data))" @onclick="SendAsync" data-testid="wireless-send">Send to Selected Screens</button>
+        @if (_message is not null) { <div class="esb-alert @(_error ? "esb-alert-error" : "esb-alert-info")" data-testid="wireless-message">@_message</div> }
+    </section>
+</div>
+
+@code {
+    private readonly GenerateOptions _options = new(); private readonly HashSet<string> _targets = [];
+    private readonly Dictionary<string, IReadOnlyList<TrustedPeer>> _gatewayTargets = [];
+    private ElementReference _imageInput; private bool _supported; private bool _importSupported; private bool _busy; private bool _error; private string? _message;
+    protected override async Task OnInitializedAsync() { Bluetooth.Changed += Changed; Wired.Changed += Changed; _supported = await Bluetooth.IsSupportedAsync(); _importSupported = await Importer.IsSupportedAsync(); }
+    private async void Changed() => await InvokeAsync(StateHasChanged);
+    private void Toggle(string id, bool selected) { if (selected) _targets.Add(id); else _targets.Remove(id); }
+    private async Task ConnectAsync() { await RunAsync(async () => { var device = await Bluetooth.ConnectAsync(); _targets.Add(device.Id); _message = $"Connected to {device.Name}."; }); }
+    private async Task DisconnectAsync(BluetoothDevice device) { _targets.Remove(device.Id); await Bluetooth.DisconnectAsync(device); }
+    private async Task RefreshGatewayTargetsAsync() { await RunAsync(async () => { foreach (var gateway in Wired.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay && d.GatewayLink is not null)) _gatewayTargets[gateway.Id] = await gateway.GatewayLink!.ListTrustedPeersAsync(); _message = $"Found {_gatewayTargets.Values.Sum(x => x.Count)} paired gateway screen(s)."; }); }
+    private async Task DecodeAsync() { await RunAsync(async () => { var found = await Importer.DecodeAsync(_imageInput); _options.Data = found.Data; _options.Type = found.Format switch { "qr_code" => BarcodeKind.Qr, "code_128" => BarcodeKind.Code128, "code_39" => BarcodeKind.Code39, "ean_13" => BarcodeKind.Ean13, "ean_8" => BarcodeKind.Ean8, "upc_a" => BarcodeKind.UpcA, _ => _options.Type }; _message = $"Read {found.Format}; review the data, then send."; }); }
+    private async Task SendAsync() { await RunAsync(async () => { var failures = new List<string>(); var sent = 0; foreach (var device in Bluetooth.Devices.Where(d => _targets.Contains(d.Id))) { try { await device.Client.GenerateAsync(_options.Clone(), device.ControlSessionId); sent++; } catch (Exception ex) { failures.Add($"{device.Name}: {ex.Message}"); } } foreach (var device in Wired.Devices.Where(d => _targets.Contains($"wired:{d.Id}"))) { try { if (device.Mode == DeviceMode.GatewayRelay && device.GatewayLink is not null) await device.GatewayLink.GenerateAsync(_options.Clone(), device.GatewayControlSessionId); else await device.Client.GenerateAsync(_options.Clone()); sent++; } catch (Exception ex) { failures.Add($"{device.Nickname}: {ex.Message}"); } } foreach (var gateway in Wired.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay && d.GatewayLink is not null)) { foreach (var peer in _gatewayTargets.GetValueOrDefault(gateway.Id) ?? []) { if (!_targets.Contains($"peer:{gateway.Id}:{peer.RouteId}")) continue; var peerName = string.IsNullOrWhiteSpace(peer.Label) ? peer.Fingerprint : peer.Label; try { await gateway.GatewayLink!.GenerateAsync(_options.Clone(), gateway.GatewayControlSessionId, routeId: checked((ushort)peer.RouteId)); sent++; } catch (Exception ex) { failures.Add($"{peerName}: {ex.Message}"); } } } _error = sent == 0 && failures.Count > 0; _message = failures.Count == 0 ? $"Sent to {sent} screen(s)." : $"Sent to {sent}; failed: {string.Join("; ", failures)}"; }); }
+    private async Task RunAsync(Func<Task> action) { _busy = true; _error = false; try { await action(); } catch (Exception ex) { _error = true; _message = ex.Message; } finally { _busy = false; } }
+    public void Dispose() { Bluetooth.Changed -= Changed; Wired.Changed -= Changed; }
+}

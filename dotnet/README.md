@@ -12,7 +12,7 @@ dotnet/
     EspBarcode.Generator/    Host-side barcode generation/layout/PNG rendering library (no device needed)
     EspBarcode.Viewer.Cli/   Standalone generate/open/close CLI (file, OS image viewer, or the viewer window)
     EspBarcode.Viewer.Gui/   WPF viewer window + embedded Kestrel loopback server, launched/driven by EspBarcode.Viewer.Cli
-    EspBarcode.Controller.Web/  Blazor WebAssembly browser control panel — connects to ESP screens over the Web Serial API (see below)
+    EspBarcode.Controller.Web/  Installable Blazor PWA — mobile BLE, Web Serial, and ESP-NOW gateway control (see below)
   tests/
     EspBarcode.Client.Tests/      xUnit tests covering the protocol client and the PDF417 "license" scenario
     EspBarcode.Generator.Tests/   xUnit tests covering encoders, layout, and PNG rendering
@@ -158,10 +158,10 @@ dotnet run --project src/EspBarcode.Viewer.Cli -- generate qr "LAB-TEST-001" --o
 (or `$env:ESP_BARCODE_VIEWER_EXE_PATH = "..."` once per shell session
 instead of repeating `--viewer-exe` on every command).
 
-## Browser control panel (`EspBarcode.Controller.Web`)
+## Mobile/browser control panel (`EspBarcode.Controller.Web`)
 
-A standalone Blazor WebAssembly app that connects to one or more ESP screens
-directly from the browser over the [Web Serial API](https://developer.mozilla.org/docs/Web/API/Web_Serial_API)
+A standalone, installable Blazor WebAssembly PWA that connects to one or more ESP screens
+from Android Chrome over Web Bluetooth, or from a Chromium browser over the [Web Serial API](https://developer.mozilla.org/docs/Web/API/Web_Serial_API)
 — no native client, install, or driver beyond a Chromium-based browser
 (Chrome/Edge; Web Serial isn't implemented in Firefox/Safari). It speaks the
 same NDJSON v1 protocol as `EspBarcode.Client` (reimplemented on top of a
@@ -174,8 +174,11 @@ that), plus the EspLink v2 subset a gateway-mode board relays
 dotnet run --project src/EspBarcode.Controller.Web
 ```
 
-Then open the printed `http://localhost:...` URL in Chrome or Edge. Pages:
-**Dashboard** (fleet overview), **Devices** (pair/monitor/reboot/orientation/
+For a phone, deploy the published `wwwroot` behind HTTPS (Web Bluetooth requires a secure context),
+open it in Chrome on Android, and use **Install app** from Chrome's menu. iOS browsers do not expose
+Web Bluetooth. Local desktop development may use the printed `http://localhost:...` URL. Pages:
+**Dashboard** (fleet overview), **Wireless** (nearby BLE picker, multi-screen targeting, camera/gallery
+barcode import, plus connected serial, gateway, and individually routed paired-peer targets), **Devices** (pair/monitor/reboot/orientation/
 gateway-mode entry — a plain client board also shows its own ESP-NOW
 gateway-discovery status, see below), **Generator** (build a barcode, push to
 one or more devices, live preview downloaded from the device itself),
@@ -185,6 +188,10 @@ mode, including its discovered/relayed ESP-NOW peers), **Automation** (Full
 Auto Mode: unattended reconnect/poll/playlist rotation), and **Settings**
 (light/dark theme — same palette as `lib/UiGeometry/src/Theme.h`, so the
 browser app and the physical screens match).
+
+The two-board hardware evidence for direct serial, two simultaneous BLE sessions, and an encrypted,
+route-addressed USB→ESP-NOW gateway round trip is recorded in
+[`docs/validation/mobile-hardware-2026-08-25.md`](../docs/validation/mobile-hardware-2026-08-25.md).
 
 ### Gateway ↔ client discovery ping/pong
 
@@ -212,13 +219,14 @@ and per-peer RTT, and a plain client's Settings screen gets a small
 dotnet test tests/EspBarcode.Controller.Web.E2ETests
 ```
 
-Gherkin features under `Features/` (device connection, generation, storage,
-gateway relay, Full Auto Mode, theme) run via Reqnroll + Playwright against a
+Gherkin features under `Features/` (mobile Bluetooth broadcast, image import, unified gateway targeting,
+device connection, generation, storage, gateway relay, Full Auto Mode, theme) run via Reqnroll + Playwright against a
 real dev-server instance and a real headless Chromium. Since Web Serial
 requires a live physical device picker no automation can click through, the
 suite injects `wwwroot/js/fakeSerial.js` — a software ESP emulator (NDJSON v1
 **and** a byte-accurate EspLink v2 COBS/hop-frame/envelope implementation) as
-`window.__espFakeSerial` before the app boots, so the whole stack, gateway
+`window.__espFakeSerial` before the app boots. `fakeBluetooth.js` adapts that same emulator to BLE's
+one-hop-frame-per-GATT-message contract, so the whole stack, gateway
 relay included, gets deterministic, hardware-free coverage. A real two-board
 hardware pass still needs a human to complete the one-time browser device
 picker (Web Serial's security model has no programmatic bypass); everything

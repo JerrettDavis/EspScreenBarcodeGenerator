@@ -310,3 +310,23 @@ a { color: var(--esb-accent); }
 }
 
 #blazor-error-ui .dismiss { cursor: pointer; position: absolute; right: 0.75rem; top: 0.5rem; }
+
+.esb-mobile-stack { display: grid; gap: 16px; max-width: 760px; }
+.esb-device-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px; padding: 12px 0; border-top: 1px solid var(--esb-hairline); }
+.esb-peer-target { margin-left: 20px; padding-left: 12px; border-left: 2px solid var(--esb-accent); }
+.esb-mobile-action { min-height: 46px; }
+
+@media (max-width: 720px) {
+  .esb-app { display: block; padding-bottom: 68px; }
+  .esb-sidebar { position: fixed; z-index: 20; inset: auto 0 0 0; width: auto; height: 64px; padding: 6px; border: 0; border-top: 1px solid var(--esb-hairline); flex-direction: row; overflow-x: auto; }
+  .esb-brand, .esb-nav-spacer { display: none; }
+  .esb-nav-link { min-width: 62px; padding: 7px 9px; justify-content: center; font-size: 0; }
+  .esb-nav-link::first-letter { font-size: 1.35rem; }
+  .esb-main { padding: 16px 14px 28px; }
+  .esb-topbar { margin-bottom: 16px; }
+  .esb-card { padding: 16px; }
+  .esb-device-row { grid-template-columns: 1fr auto; }
+  .esb-device-row .esb-faint { grid-column: 1; }
+  .esb-mobile-action { width: 100%; }
+  .esb-sticky-action { position: sticky; bottom: 72px; z-index: 10; }
+}

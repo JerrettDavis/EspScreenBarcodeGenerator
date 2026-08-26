@@ -6,6 +6,26 @@ namespace EspBarcode.Connectivity.Tests;
 public class LinkSessionTests
 {
     [Fact]
+    public async Task ControlSession_UsesConfiguredCarrierProfile()
+    {
+        await using var link = new RecordingMessageLink();
+        await using var client = new EspLinkControlSession(link, CarrierProfileId.BleGattV1);
+        client.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        var send = client.SendCommandAsync(ServiceId.System, "{}"u8.ToArray(), 0, TimeSpan.FromSeconds(5), cts.Token, routeId: 42);
+        await link.MessageSent.Task.WaitAsync(cts.Token);
+
+        Assert.Equal(CarrierProfileId.BleGattV1, link.Profile);
+        Assert.Equal((ushort)42, link.RouteId);
+        Assert.True(MessageEnvelope.TryDecode(link.Message!, out var request, out _, out _));
+        var response = new MessageEnvelope { Kind = MessageKind.Result, OperationId = 2, CorrelationId = request.OperationId };
+        Assert.True(MessageEnvelope.TryEncode(response, "{}"u8, out var encoded, out _));
+        await link.Responses.Writer.WriteAsync(encoded, cts.Token);
+        await send;
+    }
+
+    [Fact]
     public async Task SendMessage_IsReceivedIntactOnTheOtherEndOfALoopback()
     {
         var (left, right) = InMemoryDuplexConnection.CreatePair();
@@ -62,4 +82,18 @@ public class LinkSessionTests
         Assert.Equal(MessageKind.Result, responseEnvelope.Kind);
         await deviceTask;
     }
+}
+
+file sealed class RecordingMessageLink : IMessageLinkSession
+{
+    public System.Threading.Channels.Channel<byte[]> Responses { get; } = System.Threading.Channels.Channel.CreateUnbounded<byte[]>();
+    public TaskCompletionSource MessageSent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public CarrierProfileId? Profile { get; private set; }
+    public ushort RouteId { get; private set; }
+    public byte[]? Message { get; private set; }
+    public Task SendMessageAsync(byte[] layer3Message, TrafficClass trafficClass, CarrierProfileId profileId, CancellationToken cancellationToken, ushort routeId = 0)
+    { Message = layer3Message; Profile = profileId; RouteId = routeId; MessageSent.TrySetResult(); return Task.CompletedTask; }
+    public async IAsyncEnumerable<byte[]> ReceiveMessagesAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    { await foreach (var item in Responses.Reader.ReadAllAsync(cancellationToken)) yield return item; }
+    public ValueTask DisposeAsync() { Responses.Writer.TryComplete(); return ValueTask.CompletedTask; }
 }

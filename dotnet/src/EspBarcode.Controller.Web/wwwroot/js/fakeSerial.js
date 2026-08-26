@@ -104,6 +104,7 @@
         const expectedCrc = view.getUint32(32 + payloadLength, true);
         if (crc32(bytes.subarray(0, 32 + payloadLength)) !== expectedCrc) return null;
         return {
+            routeId: view.getUint16(8, true),
             linkSessionId: view.getUint32(12, true),
             linkMessageId: view.getUint32(16, true),
             payload: bytes.slice(32, 32 + payloadLength),
@@ -433,6 +434,7 @@
                     carrier: { profile: "stream-standard", maxFrameBytes: 4096 },
                 };
             } else if (name === "barcode.generate") {
+                if (this.config.requiredRouteId != null && frame.routeId !== this.config.requiredRouteId) return;
                 const spec = this._mergeSpec(body);
                 this.current = spec;
                 responseBody = {
@@ -476,6 +478,7 @@
         for (const cfg of configs) registry.ports.push({ port: new FakePort(cfg), cfg });
     }
 
+    window.__espFakeTransportFactory = config => new FakePort(config);
     window.__espFakeSerial = {
         async requestPort() {
             ensureConfigured();

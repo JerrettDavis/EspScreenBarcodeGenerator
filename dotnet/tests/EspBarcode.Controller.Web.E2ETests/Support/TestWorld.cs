@@ -16,6 +16,14 @@ public sealed class TestWorld : IAsyncDisposable
     {
         Context = await PlaywrightRunner.Browser!.NewContextAsync();
         await Context.AddInitScriptAsync(scriptPath: FakeSerialScriptPath);
+        await Context.AddInitScriptAsync(scriptPath: FakeBluetoothScriptPath);
+        await Context.AddInitScriptAsync("""
+            window.__espFakeBluetoothConfig = [
+              { name: 'Lab Display A', firmware: '0.2.0-fake' },
+              { name: 'Lab Display B', firmware: '0.2.0-fake' }
+            ];
+            window.BarcodeDetector = class { async detect() { return [window.__espFakeBarcodeResult ?? { rawValue: 'PHOTO-QR-001', format: 'qr_code' }]; } };
+            """);
         Page = await Context.NewPageAsync();
         // Cold Blazor WASM boot (multi-MB runtime download + JIT) can occasionally take longer than
         // Playwright's 30s default under a loaded machine; the app logic itself isn't slow.
@@ -25,7 +33,8 @@ public sealed class TestWorld : IAsyncDisposable
 
     /// <summary>(Re)configures the fake Web Serial devices and (re)loads the app so the change applies.</summary>
     public async Task ConfigureFakeDevicesAsync(
-        int authorizedCount, int unauthorizedCount = 0, IReadOnlyList<object>? trustedPeers = null)
+        int authorizedCount, int unauthorizedCount = 0, IReadOnlyList<object>? trustedPeers = null,
+        int? requiredRouteId = null)
     {
         var configs = new List<object>();
         for (var i = 0; i < authorizedCount; i++)
@@ -34,6 +43,7 @@ public sealed class TestWorld : IAsyncDisposable
             {
                 id = $"fake-{i + 1}", authorized = true, firmware = DefaultFirmware, device = "EspScreenBarcodeGenerator",
                 trustedPeers = trustedPeers ?? Array.Empty<object>(),
+                requiredRouteId,
             });
         }
         for (var i = 0; i < unauthorizedCount; i++)
@@ -53,6 +63,12 @@ public sealed class TestWorld : IAsyncDisposable
 
     private static readonly string FakeSerialScriptPath = Path.GetFullPath(
         Path.Combine(SourceDirectory(), "..", "..", "..", "src", "EspBarcode.Controller.Web", "wwwroot", "js", "fakeSerial.js"));
+
+    private static readonly string FakeBluetoothScriptPath = Path.GetFullPath(
+        Path.Combine(SourceDirectory(), "..", "..", "..", "src", "EspBarcode.Controller.Web", "wwwroot", "js", "fakeBluetooth.js"));
+
+    public static readonly string SampleImagePath = Path.GetFullPath(
+        Path.Combine(SourceDirectory(), "..", "..", "..", "src", "EspBarcode.Controller.Web", "wwwroot", "icon-192.png"));
 
     private static string SourceDirectory([CallerFilePath] string path = "") => Path.GetDirectoryName(path)!;
 }

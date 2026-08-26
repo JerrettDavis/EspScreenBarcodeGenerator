@@ -8,6 +8,9 @@ builder.RootComponents.Add<App>("#app");
 builder.RootComponents.Add<HeadOutlet>("head::after");
 
 builder.Services.AddSingleton<WebSerialModule>();
+builder.Services.AddSingleton<WebBluetoothModule>();
+builder.Services.AddSingleton<BluetoothDeviceRegistry>();
+builder.Services.AddSingleton<BarcodeImportService>();
 builder.Services.AddSingleton<LocalStorageService>();
 builder.Services.AddSingleton<DeviceRegistry>();
 builder.Services.AddSingleton<BarcodeLibraryService>();
