@@ -22,6 +22,7 @@
     function fromBase64(value) { const binary = atob(value); return Uint8Array.from(binary, c => c.charCodeAt(0)); }
 
     const links = new Map(); let next = 1;
+    window.__espFakeBluetoothTelemetry = { activeWrites: 0, maxConcurrentWrites: 0 };
     window.__espFakeBluetooth = {
         async connect(dotNetRef) {
             const config = (window.__espFakeBluetoothConfig ?? [{ name: 'Lab Display', firmware: '0.2.0-fake' }])[links.size];
@@ -42,8 +43,16 @@
         },
         async write(id, encoded) {
             const state = links.get(id); if (!state) throw new Error('Bluetooth device is not connected');
-            const framed = cobsEncode(fromBase64(encoded)); const bytes = new Uint8Array(framed.length + 1); bytes.set(framed); bytes[bytes.length - 1] = 0;
-            state.port._onHostWrite(bytes);
+            const telemetry = window.__espFakeBluetoothTelemetry;
+            telemetry.activeWrites++;
+            telemetry.maxConcurrentWrites = Math.max(telemetry.maxConcurrentWrites, telemetry.activeWrites);
+            try {
+                if (state.port.config.writeDelayMs) await new Promise(resolve => setTimeout(resolve, state.port.config.writeDelayMs));
+                const framed = cobsEncode(fromBase64(encoded)); const bytes = new Uint8Array(framed.length + 1); bytes.set(framed); bytes[bytes.length - 1] = 0;
+                state.port._onHostWrite(bytes);
+            } finally {
+                telemetry.activeWrites--;
+            }
         },
         async disconnect(id) {
             const state = links.get(id); if (!state) return; state.closed = true; await state.reader.cancel(); links.delete(id);

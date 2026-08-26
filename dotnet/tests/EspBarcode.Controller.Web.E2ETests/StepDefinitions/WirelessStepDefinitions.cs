@@ -78,6 +78,13 @@ public sealed class WirelessStepDefinitions(TestWorld world)
     [Then("the wireless controller reports it sent to 2 screens")]
     public async Task ThenSentToTwo() => await Assertions.Expect(Page.Locator("[data-testid=wireless-message]")).ToContainTextAsync("Sent to 2 screen(s)");
 
+    [Then("both Bluetooth screen writes overlapped")]
+    public async Task ThenBluetoothWritesOverlapped()
+    {
+        var maxConcurrentWrites = await Page.EvaluateAsync<int>("window.__espFakeBluetoothTelemetry.maxConcurrentWrites");
+        Xunit.Assert.Equal(2, maxConcurrentWrites);
+    }
+
     [Then("the wireless controller reports it sent to 1 screen")]
     public async Task ThenSentToOne() => await Assertions.Expect(Page.Locator("[data-testid=wireless-message]")).ToContainTextAsync("Sent to 1 screen(s)");
 

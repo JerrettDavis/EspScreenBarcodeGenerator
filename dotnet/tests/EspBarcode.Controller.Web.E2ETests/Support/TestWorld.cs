@@ -19,8 +19,8 @@ public sealed class TestWorld : IAsyncDisposable
         await Context.AddInitScriptAsync(scriptPath: FakeBluetoothScriptPath);
         await Context.AddInitScriptAsync("""
             window.__espFakeBluetoothConfig = [
-              { name: 'Lab Display A', firmware: '0.2.0-fake' },
-              { name: 'Lab Display B', firmware: '0.2.0-fake' }
+              { name: 'Lab Display A', firmware: '0.2.0-fake', writeDelayMs: 100 },
+              { name: 'Lab Display B', firmware: '0.2.0-fake', writeDelayMs: 100 }
             ];
             window.BarcodeDetector = class { async detect() { return [window.__espFakeBarcodeResult ?? { rawValue: 'PHOTO-QR-001', format: 'qr_code' }]; } };
             """);

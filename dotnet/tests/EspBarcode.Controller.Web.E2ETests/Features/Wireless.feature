@@ -15,6 +15,7 @@ Feature: Mobile wireless control
     And I enter wireless barcode data "MOBILE-LAB-001"
     And I send the wireless barcode
     Then the wireless controller reports it sent to 2 screens
+    And both Bluetooth screen writes overlapped
 
   Scenario: Importing a QR photo prefills a clean request
     Given the controller app is open with fake Bluetooth screens
