@@ -74,6 +74,10 @@ public class GeneratorStepDefinitions(TestWorld world)
         Xunit.Assert.True(width > 0, "expected the preview canvas to have been drawn to");
     }
 
+    [Then("a text result summary is shown instead of a live preview")]
+    public async Task ThenTextSummaryShownInsteadOfPreview()
+        => await Assertions.Expect(Page.Locator("[data-testid=generator-result-summary]")).ToContainTextAsync("modules");
+
     [Then("the library contains an item named {string}")]
     public async Task ThenLibraryContainsItem(string name)
     {

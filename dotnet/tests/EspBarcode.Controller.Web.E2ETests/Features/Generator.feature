@@ -46,3 +46,11 @@ Feature: Barcode generator
     When I upload a barcode photo to the generator
     Then the generator barcode type is "Qr"
     And the generator data is "PHOTO-QR-001"
+
+  Scenario: Result preview falls back to a text summary for a Bluetooth-only target
+    Given I connect a Bluetooth screen from Devices
+    When I set the generator type to "Qr" and data to "BLE-PREVIEW-001"
+    And I select the first Bluetooth generator target
+    And I click Generate & Push
+    Then the generator reports it pushed to 1 device(s)
+    And a text result summary is shown instead of a live preview
