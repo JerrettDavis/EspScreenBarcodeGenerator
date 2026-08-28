@@ -30,3 +30,17 @@ Feature: Device connection
     When I reconnect known devices
     And I refresh the first device
     Then the device list shows a gateway link status of "searching" for the first device
+
+  Scenario: The controller is installable and uses mobile navigation
+    When I resize the controller to a phone viewport
+    Then the PWA manifest is linked
+    And navigation is docked to the bottom of the phone viewport
+
+  Scenario: Connecting Bluetooth screens from the Devices page
+    When I connect two Bluetooth screens from Devices
+    Then the device list shows 2 connected Bluetooth screens
+
+  Scenario: Disconnecting a Bluetooth screen
+    When I connect two Bluetooth screens from Devices
+    And I disconnect the first Bluetooth screen
+    Then the device list shows 1 connected Bluetooth screen

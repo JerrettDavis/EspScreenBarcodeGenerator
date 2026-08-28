@@ -18,3 +18,39 @@ Feature: Barcode generator
     When I set the generator type to "Code128" and data to "LOT-2026-00042"
     And I save the generator spec to the library as "Lot Sample"
     Then the library contains an item named "Lot Sample"
+
+  Scenario: Sending a barcode to two nearby Bluetooth screens
+    Given I connect two Bluetooth screens from Devices
+    When I set the generator type to "Qr" and data to "MOBILE-LAB-001"
+    And I select the first Bluetooth generator target
+    And I select the second Bluetooth generator target
+    And I click Generate & Push
+    Then the generator reports it pushed to 2 device(s)
+
+  Scenario: Sending through a wired ESP-NOW gateway to itself
+    Given I put the first device into gateway mode
+    When I set the generator type to "Qr" and data to "GATEWAY-DIRECT-001"
+    And I select the gateway generator target
+    And I click Generate & Push
+    Then the generator reports it pushed to 1 device(s)
+
+  Scenario: Addressing one paired screen through its gateway route
+    Given a gateway has a paired screen on route 7
+    When I set the generator type to "Qr" and data to "ROUTED-SCREEN-007"
+    And I refresh paired gateway screens on the generator
+    And I select the first paired gateway generator target
+    And I click Generate & Push
+    Then the generator reports it pushed to 1 device(s)
+
+  Scenario: Importing a QR photo prefills a clean request
+    When I upload a barcode photo to the generator
+    Then the generator barcode type is "Qr"
+    And the generator data is "PHOTO-QR-001"
+
+  Scenario: Result preview falls back to a text summary for a Bluetooth-only target
+    Given I connect a Bluetooth screen from Devices
+    When I set the generator type to "Qr" and data to "BLE-PREVIEW-001"
+    And I select the first Bluetooth generator target
+    And I click Generate & Push
+    Then the generator reports it pushed to 1 device(s)
+    And a text result summary is shown instead of a live preview

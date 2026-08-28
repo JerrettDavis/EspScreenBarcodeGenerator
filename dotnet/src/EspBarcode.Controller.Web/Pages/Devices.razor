@@ -1,6 +1,7 @@
 @page "/devices"
 @implements IDisposable
 @inject DeviceRegistry Registry
+@inject BluetoothDeviceRegistry Bluetooth
 
 <PageTitle>Devices - ESP Barcode Control</PageTitle>
 
@@ -24,13 +25,20 @@
             <button class="esb-btn esb-btn-primary" type="button" @onclick="ConnectNewAsync" disabled="@_busy" data-testid="connect-new-device">
                 + Connect Device
             </button>
+            <button class="esb-btn esb-btn-primary" type="button" @onclick="ConnectBluetoothAsync" disabled="@(!_bleSupported || _busy)" data-testid="connect-bluetooth">
+                + Add Bluetooth Screen
+            </button>
         </div>
     </div>
+    @if (!_bleSupported)
+    {
+        <div class="esb-alert esb-alert-info" style="margin-top:10px;" data-testid="ble-unsupported">Web Bluetooth is unavailable in this browser.</div>
+    }
 </div>
 
-@if (Registry.Devices.Count == 0)
+@if (Registry.Devices.Count == 0 && Bluetooth.Devices.Count == 0)
 {
-    <div class="esb-empty" data-testid="devices-empty">No devices connected. Click "Connect Device" and pick an ESP screen's serial port.</div>
+    <div class="esb-empty" data-testid="devices-empty">No devices connected. Click "Connect Device" for a USB screen, or "Add Bluetooth Screen" for a nearby wireless one.</div>
 }
 else
 {
@@ -132,14 +140,36 @@ else
                 }
             </div>
         }
+        @foreach (var device in Bluetooth.Devices)
+        {
+            <div class="esb-card" data-testid="bluetooth-device-card" data-device-id="@device.Id">
+                <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-weight:700; margin-bottom:6px;">@device.Name</div>
+                        <div class="esb-faint">Bluetooth · firmware @device.Firmware</div>
+                    </div>
+                    <span class="esb-badge esb-badge-ok">Bluetooth</span>
+                </div>
+                <div class="esb-btn-row" style="margin-top:12px;">
+                    <button class="esb-btn esb-btn-sm esb-btn-danger" type="button" disabled="@_busy"
+                            @onclick="@(() => DisconnectBluetoothAsync(device))">Disconnect</button>
+                </div>
+            </div>
+        }
     </div>
 }
 
 @code {
     private bool _busy;
     private string? _error;
+    private bool _bleSupported;
 
-    protected override void OnInitialized() => Registry.Changed += OnChanged;
+    protected override async Task OnInitializedAsync()
+    {
+        Registry.Changed += OnChanged;
+        Bluetooth.Changed += OnChanged;
+        _bleSupported = await Bluetooth.IsSupportedAsync();
+    }
 
     private async void OnChanged() => await InvokeAsync(StateHasChanged);
 
@@ -236,5 +266,25 @@ else
         finally { _busy = false; }
     }
 
-    public void Dispose() => Registry.Changed -= OnChanged;
+    private async Task ConnectBluetoothAsync()
+    {
+        _error = null;
+        _busy = true;
+        try { await Bluetooth.ConnectAsync(); }
+        catch (Exception ex) { _error = $"Could not connect: {ex.Message}"; }
+        finally { _busy = false; }
+    }
+
+    private async Task DisconnectBluetoothAsync(BluetoothDevice device)
+    {
+        _busy = true;
+        try { await Bluetooth.DisconnectAsync(device); }
+        finally { _busy = false; }
+    }
+
+    public void Dispose()
+    {
+        Registry.Changed -= OnChanged;
+        Bluetooth.Changed -= OnChanged;
+    }
 }

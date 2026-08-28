@@ -1,8 +1,11 @@
 @page "/generator"
 @implements IDisposable
 @inject DeviceRegistry Devices
+@inject BluetoothDeviceRegistry Bluetooth
+@inject GenerationTargetProvider TargetProvider
 @inject BarcodeLibraryService Library
 @inject BarcodeCanvasRenderer Renderer
+@inject BarcodeImportService Importer
 
 <PageTitle>Generator - ESP Barcode Control</PageTitle>
 
@@ -11,6 +14,12 @@
 <div style="display:grid; grid-template-columns: minmax(320px, 1fr) 320px; gap:20px; align-items:start;">
     <div class="esb-card">
         <h2>Barcode Spec</h2>
+
+        <div class="esb-field">
+            <label for="gen-photo">Import from photo</label>
+            <input id="gen-photo" @ref="_imageInput" type="file" accept="image/*" capture="environment" data-testid="barcode-photo" />
+            <button class="esb-btn" type="button" disabled="@(!_importSupported || _busy)" @onclick="DecodeAsync" data-testid="decode-photo">Read Barcode Photo</button>
+        </div>
 
         <div class="esb-form-row">
             <div class="esb-field">
@@ -87,20 +96,50 @@
         </div>
 
         <h3>Target Devices</h3>
-        @if (ClientDevices.Count == 0)
+        @{ var immediateTargets = TargetProvider.GetImmediateTargets(); }
+        @if (immediateTargets.Count == 0)
         {
-            <p class="esb-muted">No client-mode devices connected. Go to <a href="devices">Devices</a> first.</p>
+            <p class="esb-muted">No devices connected. Go to <a href="devices">Devices</a> first.</p>
         }
         else
         {
-            @foreach (var device in ClientDevices)
+            @foreach (var target in immediateTargets)
             {
                 <label class="esb-checkbox" style="margin-bottom:6px;">
-                    <input type="checkbox" data-testid="generator-target-checkbox" checked="@_targets.Contains(device.Id)"
-                           @onchange="@(e => ToggleTarget(device.Id, (bool)e.Value!))" />
-                    @device.Nickname
+                    <input type="checkbox" data-testid="generator-target-checkbox" data-kind="@target.Kind.ToString().ToLowerInvariant()"
+                           checked="@_targets.Contains(target.Id)"
+                           @onchange="@(e => ToggleTarget(target.Id, (bool)e.Value!))" />
+                    @target.DisplayName <span class="esb-faint">(@KindLabel(target.Kind))</span>
                 </label>
             }
+        }
+
+        @foreach (var gateway in Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay && d.GatewayLink is not null))
+        {
+            <div style="margin-top:10px;">
+                <label class="esb-checkbox" style="margin-bottom:6px;">
+                    <input type="checkbox" data-testid="generator-target-checkbox" data-kind="gatewaydirect"
+                           checked="@_targets.Contains($"wired:{gateway.Id}")"
+                           @onchange="@(e => ToggleTarget($"wired:{gateway.Id}", (bool)e.Value!))" />
+                    @gateway.Nickname <span class="esb-faint">(Wired — gateway)</span>
+                </label>
+                <button class="esb-btn esb-btn-sm" type="button" data-testid="refresh-gateway-targets"
+                        @onclick="@(() => RefreshGatewayTargetsAsync(gateway))">
+                    Refresh Paired Gateway Screens
+                </button>
+                @if (_gatewayPeerTargets.TryGetValue(gateway.Id, out var peerTargets))
+                {
+                    @foreach (var peer in peerTargets)
+                    {
+                        <label class="esb-checkbox" style="margin:6px 0 0 20px; padding-left:12px; border-left:2px solid var(--esb-accent);">
+                            <input type="checkbox" data-testid="generator-target-checkbox" data-kind="gatewaypeer"
+                                   checked="@_targets.Contains(peer.Id)"
+                                   @onchange="@(e => ToggleTarget(peer.Id, (bool)e.Value!))" />
+                            @peer.DisplayName <span class="esb-faint">(Gateway peer)</span>
+                        </label>
+                    }
+                }
+            </div>
         }
 
         <div class="esb-btn-row" style="margin-top:16px;">
@@ -123,14 +162,14 @@
 
     <div class="esb-card">
         <h2>Preview</h2>
-        <p class="esb-faint">Downloaded live from the first target device after generating — pixel-accurate to the panel.</p>
+        <p class="esb-faint">Downloaded live from wired targets after generating, pixel-accurate to the panel; other connection types show a summary until they support the same download.</p>
         <div class="esb-preview">
             <canvas id="generator-preview-canvas" width="240" height="240" data-testid="generator-preview"></canvas>
         </div>
-        @if (_lastResult is not null)
+        @if (_resultSummary is not null)
         {
-            <p class="esb-muted" style="margin-top:10px;">
-                @_lastResult.Width×@_lastResult.Height modules · normalized "@_lastResult.NormalizedData"
+            <p class="esb-muted" style="margin-top:10px;" data-testid="generator-result-summary">
+                @_resultSummary.Width×@_resultSummary.Height modules · normalized "@_resultSummary.NormalizedData"
             </p>
         }
     </div>
@@ -139,18 +178,73 @@
 @code {
     private readonly GenerateOptions _options = new();
     private readonly HashSet<string> _targets = [];
+    private readonly Dictionary<string, IReadOnlyList<GenerationTarget>> _gatewayPeerTargets = [];
     private string? _saveAsName;
     private bool _busy;
     private string? _message;
     private bool _isError;
-    private GenerateResult? _lastResult;
+    private GenerateResult? _resultSummary;
+    private ElementReference _imageInput;
+    private bool _importSupported;
 
-    private List<DeviceConnection> ClientDevices =>
-        Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.Client).ToList();
+    private List<GenerationTarget> AllTargets()
+    {
+        var targets = TargetProvider.GetImmediateTargets().ToList();
+        foreach (var gateway in Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay && d.GatewayLink is not null))
+        {
+            targets.Add(TargetProvider.GetGatewayDirectTarget(gateway));
+            if (_gatewayPeerTargets.TryGetValue(gateway.Id, out var peers)) targets.AddRange(peers);
+        }
+        return targets;
+    }
 
-    protected override void OnInitialized() => Devices.Changed += OnChanged;
+    private async Task RefreshGatewayTargetsAsync(DeviceConnection gateway)
+    {
+        _busy = true;
+        try
+        {
+            var peers = await gateway.GatewayLink!.ListTrustedPeersAsync();
+            _gatewayPeerTargets[gateway.Id] = TargetProvider.BuildPeerTargets(gateway, peers);
+        }
+        catch (Exception ex) { _message = ex.Message; _isError = true; }
+        finally { _busy = false; }
+    }
+
+    private static string KindLabel(GenerationTargetKind kind) => kind switch
+    {
+        GenerationTargetKind.Bluetooth => "Bluetooth",
+        GenerationTargetKind.GatewayPeer => "Gateway peer",
+        _ => "Wired",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Devices.Changed += OnChanged;
+        Bluetooth.Changed += OnChanged;
+        _importSupported = await Importer.IsSupportedAsync();
+    }
 
     private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private async Task DecodeAsync()
+    {
+        _busy = true;
+        try
+        {
+            var found = await Importer.DecodeAsync(_imageInput);
+            _options.Data = found.Data;
+            _options.Type = found.Format switch
+            {
+                "qr_code" => BarcodeKind.Qr, "code_128" => BarcodeKind.Code128, "code_39" => BarcodeKind.Code39,
+                "ean_13" => BarcodeKind.Ean13, "ean_8" => BarcodeKind.Ean8, "upc_a" => BarcodeKind.UpcA,
+                _ => _options.Type,
+            };
+            _message = $"Read {found.Format}; review the data, then send.";
+            _isError = false;
+        }
+        catch (Exception ex) { _message = ex.Message; _isError = true; }
+        finally { _busy = false; }
+    }
 
     private void ToggleTarget(string id, bool selected)
     {
@@ -163,24 +257,26 @@
         _busy = true;
         _message = null;
         _isError = false;
+        _resultSummary = null;
         var options = _options.Clone();
         options.SaveAs = string.IsNullOrWhiteSpace(_saveAsName) ? null : _saveAsName;
 
         var succeeded = 0;
         var failures = new List<string>();
-        DeviceConnection? firstOk = null;
+        GenerationTarget? firstOk = null;
+        GenerateResult? firstOkResult = null;
 
-        foreach (var device in Devices.Devices.Where(d => _targets.Contains(d.Id)))
+        foreach (var target in AllTargets().Where(t => _targets.Contains(t.Id)))
         {
             try
             {
-                _lastResult = await device.Client.GenerateAsync(options);
+                var result = await target.SendAsync(options, CancellationToken.None);
                 succeeded++;
-                firstOk ??= device;
+                if (firstOk is null) { firstOk = target; firstOkResult = result; }
             }
             catch (Exception ex)
             {
-                failures.Add($"{device.Nickname}: {ex.Message}");
+                failures.Add($"{target.DisplayName}: {ex.Message}");
             }
         }
 
@@ -189,11 +285,16 @@
             : $"Generated on {succeeded} device(s); failed on {string.Join("; ", failures)}";
         _isError = failures.Count > 0 && succeeded == 0;
 
-        if (firstOk is not null && options.Display)
+        if (firstOkResult is not null)
+        {
+            _resultSummary = firstOkResult;
+        }
+
+        if (firstOk is not null && options.Display && firstOk.DownloadPreviewAsync is not null)
         {
             try
             {
-                var matrix = await firstOk.Client.DownloadCurrentMatrixAsync();
+                var matrix = await firstOk.DownloadPreviewAsync(CancellationToken.None);
                 await Renderer.RenderAsync("generator-preview-canvas", matrix);
             }
             catch
@@ -217,5 +318,9 @@
         _isError = false;
     }
 
-    public void Dispose() => Devices.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Devices.Changed -= OnChanged;
+        Bluetooth.Changed -= OnChanged;
+    }
 }

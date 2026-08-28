@@ -21,6 +21,26 @@ public class GeneratorStepDefinitions(TestWorld world)
     public async Task WhenISelectFirstDeviceAsTarget()
         => await Page.Locator("[data-testid=generator-target-checkbox]").First.CheckAsync();
 
+    [When("I select the first Bluetooth generator target")]
+    public async Task WhenISelectFirstBluetoothTarget()
+        => await Page.Locator("[data-testid=generator-target-checkbox][data-kind=bluetooth]").Nth(0).CheckAsync();
+
+    [When("I select the second Bluetooth generator target")]
+    public async Task WhenISelectSecondBluetoothTarget()
+        => await Page.Locator("[data-testid=generator-target-checkbox][data-kind=bluetooth]").Nth(1).CheckAsync();
+
+    [When("I select the gateway generator target")]
+    public async Task WhenISelectGatewayDirectTarget()
+        => await Page.Locator("[data-testid=generator-target-checkbox][data-kind=gatewaydirect]").First.CheckAsync();
+
+    [When("I refresh paired gateway screens on the generator")]
+    public async Task WhenIRefreshPairedGatewayScreens()
+        => await Page.Locator("[data-testid=refresh-gateway-targets]").ClickAsync();
+
+    [When("I select the first paired gateway generator target")]
+    public async Task WhenISelectPairedGatewayTarget()
+        => await Page.Locator("[data-testid=generator-target-checkbox][data-kind=gatewaypeer]").First.CheckAsync();
+
     [When("I click Generate & Push")]
     public async Task WhenIClickGenerateAndPush()
     {
@@ -40,6 +60,11 @@ public class GeneratorStepDefinitions(TestWorld world)
     public async Task ThenGeneratorReportsSuccess()
         => await Assertions.Expect(Page.Locator("[data-testid=generator-message]")).ToContainTextAsync("Generated");
 
+    [Then("the generator reports it pushed to {int} device\\(s\\)")]
+    public async Task ThenGeneratorReportsPushedTo(int count)
+        => await Assertions.Expect(Page.Locator("[data-testid=generator-message]"))
+            .ToContainTextAsync($"Generated and pushed to {count} device(s).");
+
     [Then("a live preview is rendered")]
     public async Task ThenLivePreviewIsRendered()
     {
@@ -49,12 +74,32 @@ public class GeneratorStepDefinitions(TestWorld world)
         Xunit.Assert.True(width > 0, "expected the preview canvas to have been drawn to");
     }
 
+    [Then("a text result summary is shown instead of a live preview")]
+    public async Task ThenTextSummaryShownInsteadOfPreview()
+        => await Assertions.Expect(Page.Locator("[data-testid=generator-result-summary]")).ToContainTextAsync("modules");
+
     [Then("the library contains an item named {string}")]
     public async Task ThenLibraryContainsItem(string name)
     {
         await Page.GoToSpaAsync("library", "Storage");
         await Assertions.Expect(Page.Locator("[data-testid=library-table]")).ToContainTextAsync(name);
     }
+
+    [When("I upload a barcode photo to the generator")]
+    public async Task WhenIUploadPhotoToGenerator()
+    {
+        await GotoGeneratorAsync();
+        await Page.Locator("[data-testid=barcode-photo]").SetInputFilesAsync(TestWorld.SampleImagePath);
+        await Page.Locator("[data-testid=decode-photo]").ClickAsync();
+    }
+
+    [Then("the generator barcode type is {string}")]
+    public async Task ThenGeneratorTypeIs(string type)
+        => await Assertions.Expect(Page.Locator("[data-testid=generator-type]")).ToHaveValueAsync(type);
+
+    [Then("the generator data is {string}")]
+    public async Task ThenGeneratorDataIs(string data)
+        => await Assertions.Expect(Page.Locator("[data-testid=generator-data]")).ToHaveValueAsync(data);
 
     private async Task GotoGeneratorAsync() => await Page.GoToSpaAsync("generator", "Generator");
 }

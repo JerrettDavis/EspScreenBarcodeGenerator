@@ -179,12 +179,12 @@ dotnet run --project src/EspBarcode.Controller.Web
 For a phone, deploy the published `wwwroot` behind HTTPS (Web Bluetooth requires a secure context),
 open it in Chrome on Android, and use **Install app** from Chrome's menu. iOS browsers do not expose
 Web Bluetooth. Local desktop development may use the printed `http://localhost:...` URL. Pages:
-**Dashboard** (fleet overview), **Wireless** (nearby BLE picker, multi-screen targeting, camera/gallery
-barcode import, plus connected serial, gateway, and individually routed paired-peer targets), **Devices** (pair/monitor/reboot/orientation/
-gateway-mode entry — a plain client board also shows its own ESP-NOW
-gateway-discovery status, see below), **Generator** (build a barcode, push to
-one or more devices, live preview downloaded from the device itself),
-**Library** (browser-local saved specs + each device's on-board LittleFS
+**Dashboard** (fleet overview), **Devices** (pair/monitor/reboot/orientation/
+gateway-mode entry, nearby BLE picker to connect/disconnect wireless screens — a plain client
+board also shows its own ESP-NOW gateway-discovery status, see below), **Generator** (build a
+barcode, camera/gallery barcode import, multi-screen targeting across wired, Bluetooth, and
+individually routed gateway/paired-peer targets, push to one or more devices at once, live
+preview downloaded from wired targets), **Library** (browser-local saved specs + each device's on-board LittleFS
 presets), **Gateway** (drive the EspLink v2 relay once a board is in gateway
 mode, including its discovered/relayed ESP-NOW peers), **Automation** (Full
 Auto Mode: unattended reconnect/poll/playlist rotation), and **Settings**
