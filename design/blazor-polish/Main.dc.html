@@ -1,0 +1,236 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+    a { color: var(--esb-accent); text-decoration: none; }
+    a:hover { color: var(--esb-accent); filter: brightness(1.15); }
+
+    .esb-app {
+      --esb-bg: #0b0c0e;
+      --esb-surface: #131519;
+      --esb-surface-alt: #1b1e23;
+      --esb-hairline: #262a30;
+      --esb-text: #f5f6f7;
+      --esb-text-muted: #9098a0;
+      --esb-text-faint: #6b7178;
+      --esb-accent: #2dd9c6;
+      --esb-accent-text: #04201c;
+      --esb-danger: #ff5449;
+      --esb-warn: #c9a82d;
+      --esb-radius: 10px;
+      --esb-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      min-height: 900px;
+      background: var(--esb-bg);
+      color: var(--esb-text);
+      display: flex;
+      font-size: 15px;
+    }
+
+    .esb-app[data-theme="light"] {
+      --esb-bg: #f4f5f6;
+      --esb-surface: #ffffff;
+      --esb-surface-alt: #ecedef;
+      --esb-hairline: #dee0e3;
+      --esb-text: #16181b;
+      --esb-text-muted: #6b7078;
+      --esb-text-faint: #8a8f96;
+      --esb-accent: #0c8c82;
+      --esb-accent-text: #ffffff;
+      --esb-danger: #d92d20;
+      --esb-shadow: 0 8px 24px rgba(16, 18, 20, 0.12);
+    }
+
+    /* ---- sidebar / nav ---- */
+    .esb-sidebar { width: 224px; flex: 0 0 224px; background: var(--esb-surface); border-right: 1px solid var(--esb-hairline); display: flex; flex-direction: column; padding: 20px 12px; gap: 2px; }
+    .esb-brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 22px; font-weight: 700; font-size: 1.02rem; letter-spacing: 0.01em; }
+    .esb-brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--esb-accent); box-shadow: 0 0 10px var(--esb-accent); flex: none; }
+    .esb-nav-link { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: var(--esb-radius); color: var(--esb-text-muted); text-decoration: none; font-size: 0.9rem; font-weight: 600; }
+    .esb-nav-link svg { flex: none; opacity: 0.85; }
+    .esb-nav-link:hover { background: var(--esb-surface-alt); color: var(--esb-text); }
+    .esb-nav-link:hover svg { opacity: 1; }
+    .esb-nav-link.active { background: var(--esb-accent); color: var(--esb-accent-text); }
+    .esb-nav-link.active svg { opacity: 1; }
+    .esb-nav-spacer { flex: 1; }
+
+    .esb-main { flex: 1; min-width: 0; padding: 24px 32px 64px; }
+    .esb-topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 26px; gap: 16px; }
+    .esb-topbar h1 { margin: 0; font-size: 1.4rem; }
+    .esb-main > h1 { margin: 0 0 20px; font-size: 1.4rem; }
+
+    .esb-theme-toggle { display: inline-flex; align-items: center; gap: 8px; background: var(--esb-surface-alt); border: 1px solid var(--esb-hairline); border-radius: 999px; padding: 7px 14px 7px 12px; cursor: pointer; color: var(--esb-text); font-size: 0.83rem; font-weight: 600; }
+    .esb-theme-toggle:hover { border-color: var(--esb-accent); }
+
+    /* ---- badges ---- */
+    .esb-badge { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 4px 12px 4px 10px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; background: var(--esb-surface-alt); color: var(--esb-text-muted); border: 1px solid transparent; }
+    .esb-badge-ok { color: var(--esb-accent); border-color: color-mix(in srgb, var(--esb-accent) 30%, transparent); }
+    .esb-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+    .esb-badge-ok .esb-badge-dot { box-shadow: 0 0 0 0 color-mix(in srgb, var(--esb-accent) 60%, transparent); animation: esb-pulse 2.2s ease-out infinite; }
+    .esb-badge-error { color: var(--esb-danger); }
+    .esb-badge-warn { color: var(--esb-warn); }
+    @keyframes esb-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--esb-accent) 55%, transparent); } 70% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--esb-accent) 0%, transparent); } 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--esb-accent) 0%, transparent); } }
+    @media (prefers-reduced-motion: reduce) { .esb-badge-ok .esb-badge-dot { animation: none; } }
+
+    /* ---- cards / stats ---- */
+    .esb-card { background: var(--esb-surface); border: 1px solid var(--esb-hairline); border-radius: var(--esb-radius); padding: 18px 20px; box-shadow: var(--esb-shadow); }
+    .esb-card + .esb-card { margin-top: 16px; }
+    .esb-card h2 { margin: 0 0 14px; font-size: 1.02rem; }
+
+    .esb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin-bottom: 20px; }
+    .esb-stat { background: var(--esb-surface); border: 1px solid var(--esb-hairline); border-radius: var(--esb-radius); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+    .esb-stat-icon { width: 30px; height: 30px; border-radius: 8px; background: var(--esb-surface-alt); color: var(--esb-accent); display: flex; align-items: center; justify-content: center; }
+    .esb-stat-label { color: var(--esb-text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+    .esb-stat-value { font-size: 1.65rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    .esb-alert { border-radius: 8px; padding: 11px 14px; font-size: 0.85rem; margin-bottom: 16px; border: 1px solid var(--esb-hairline); display: flex; align-items: center; gap: 9px; }
+    .esb-alert-info { border-color: color-mix(in srgb, var(--esb-accent) 40%, transparent); color: var(--esb-text); background: color-mix(in srgb, var(--esb-accent) 7%, var(--esb-surface)); }
+    .esb-alert-info svg { color: var(--esb-accent); flex: none; }
+
+    /* ---- table ---- */
+    .esb-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    .esb-table th { text-align: left; color: var(--esb-text-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; padding: 0 10px 10px; border-bottom: 1px solid var(--esb-hairline); }
+    .esb-table td { padding: 11px 10px; border-bottom: 1px solid var(--esb-hairline); vertical-align: middle; }
+    .esb-table tr:last-child td { border-bottom: none; }
+    .esb-faint { color: var(--esb-text-faint); font-size: 0.8rem; font-variant-numeric: tabular-nums; }
+    .esb-device-name { display: flex; align-items: center; gap: 9px; font-weight: 600; }
+    .esb-device-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--esb-hairline); flex: none; }
+    .esb-device-dot.on { background: var(--esb-accent); box-shadow: 0 0 6px var(--esb-accent); }
+    .esb-device-dot.err { background: var(--esb-danger); }
+  </style>
+</helmet>
+
+<div class="esb-app" data-theme="{{theme}}">
+  <nav class="esb-sidebar">
+    <div class="esb-brand"><span class="esb-brand-dot"></span> ESP Barcode Control</div>
+
+    <a class="esb-nav-link active" href="#">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>
+      Dashboard
+    </a>
+    <a class="esb-nav-link" href="#">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v4M15 2v4M7 6h10v4a5 5 0 0 1-5 5 5 5 0 0 1-5-5V6z"/><path d="M12 15v4M9 22h6"/></svg>
+      Devices
+    </a>
+    <a class="esb-nav-link" href="#">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>
+      Wireless
+    </a>
+    <a class="esb-nav-link" href="#">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11V5a2 2 0 0 1 2-2h6l10 10-8 8L3 11z"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/></svg>
+      Generator
+    </a>
+    <a class="esb-nav-link" href="#">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg>
+      Library
+    </a>
+    <a class="esb-nav-link" href="#">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10M8 20h8M9 6a3 3 0 0 1 6 0M6 3a7 7 0 0 1 12 0"/><circle cx="12" cy="6" r="1.3" fill="currentColor" stroke="none"/></svg>
+      Gateway
+    </a>
+    <a class="esb-nav-link" href="#">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="2"/><path d="M12 8V4M9 4h6"/><circle cx="9" cy="13" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="13" r="1.1" fill="currentColor" stroke="none"/><path d="M9 17h6"/></svg>
+      Automation
+    </a>
+    <div class="esb-nav-spacer"></div>
+    <a class="esb-nav-link" href="#">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.96 19a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.96a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.04-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1.04H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15z"/></svg>
+      Settings
+    </a>
+  </nav>
+
+  <main class="esb-main">
+    <div class="esb-topbar">
+      <span class="esb-badge esb-badge-ok"><span class="esb-badge-dot"></span>3 device(s) connected</span>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <span class="esb-badge esb-badge-ok">Full Auto Mode</span>
+        <button class="esb-theme-toggle" type="button">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          Dark
+        </button>
+      </div>
+    </div>
+
+    <h1>Dashboard</h1>
+
+    <div class="esb-grid">
+      <div class="esb-stat">
+        <div class="esb-stat-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v4M15 2v4M7 6h10v4a5 5 0 0 1-5 5 5 5 0 0 1-5-5V6z"/><path d="M12 15v4M9 22h6"/></svg></div>
+        <div class="esb-stat-label">Connected Devices</div>
+        <div class="esb-stat-value">3</div>
+      </div>
+      <div class="esb-stat">
+        <div class="esb-stat-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10M8 20h8M9 6a3 3 0 0 1 6 0M6 3a7 7 0 0 1 12 0"/><circle cx="12" cy="6" r="1.3" fill="currentColor" stroke="none"/></svg></div>
+        <div class="esb-stat-label">Gateway-Mode Boards</div>
+        <div class="esb-stat-value">1</div>
+      </div>
+      <div class="esb-stat">
+        <div class="esb-stat-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="2"/><path d="M12 8V4M9 4h6"/><circle cx="9" cy="13" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="13" r="1.1" fill="currentColor" stroke="none"/><path d="M9 17h6"/></svg></div>
+        <div class="esb-stat-label">Full Auto Mode</div>
+        <div class="esb-stat-value">On</div>
+      </div>
+      <div class="esb-stat">
+        <div class="esb-stat-icon" style="color: var(--esb-danger);"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2.6 18a1.7 1.7 0 0 0 1.45 2.55h15.9A1.7 1.7 0 0 0 21.4 18L13.7 3.9a1.7 1.7 0 0 0-2.94 0z"/></svg></div>
+        <div class="esb-stat-label">Devices With Errors</div>
+        <div class="esb-stat-value">1</div>
+      </div>
+    </div>
+
+    <div class="esb-alert esb-alert-info">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10M8 20h8M9 6a3 3 0 0 1 6 0M6 3a7 7 0 0 1 12 0"/></svg>
+      Auto-pushed 12 labels to Bench Scanner 1 at 2:41 PM.
+    </div>
+
+    <div class="esb-card">
+      <h2>Devices</h2>
+      <table class="esb-table">
+        <thead>
+        <tr><th>Nickname</th><th>Mode</th><th>Firmware</th><th>Status</th><th>Last Seen</th></tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td><div class="esb-device-name"><span class="esb-device-dot on"></span>Bench Scanner 1</div></td>
+          <td>Client</td><td class="esb-faint">v2.4.1</td>
+          <td><span class="esb-badge esb-badge-ok"><span class="esb-badge-dot"></span>Online</span></td>
+          <td class="esb-faint">2:41 PM</td>
+        </tr>
+        <tr>
+          <td><div class="esb-device-name"><span class="esb-device-dot on"></span>Line 3 Gateway</div></td>
+          <td>Gateway relay</td><td class="esb-faint">v2.4.1</td>
+          <td><span class="esb-badge esb-badge-ok"><span class="esb-badge-dot"></span>Online</span></td>
+          <td class="esb-faint">2:40 PM</td>
+        </tr>
+        <tr>
+          <td><div class="esb-device-name"><span class="esb-device-dot err"></span>Receiving Dock</div></td>
+          <td>Client</td><td class="esb-faint">v2.3.0</td>
+          <td><span class="esb-badge esb-badge-error" title="Display init failed">Error</span></td>
+          <td class="esb-faint">11:02 AM</td>
+        </tr>
+        <tr>
+          <td><div class="esb-device-name"><span class="esb-device-dot"></span>Pack Station 4</div></td>
+          <td>Client</td><td class="esb-faint">v2.4.1</td>
+          <td><span class="esb-badge esb-badge-error">Disconnected</span></td>
+          <td class="esb-faint">9:14 AM</td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'dark' };
+  }
+}
+</script>
+</body>
+</html>

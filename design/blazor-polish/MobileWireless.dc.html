@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+    a { color: var(--esb-accent); text-decoration: none; }
+
+    .esb-app {
+      --esb-bg: #0b0c0e; --esb-surface: #131519; --esb-surface-alt: #1b1e23; --esb-hairline: #262a30;
+      --esb-text: #f5f6f7; --esb-text-muted: #9098a0; --esb-text-faint: #6b7178;
+      --esb-accent: #2dd9c6; --esb-accent-text: #04201c; --esb-danger: #ff5449; --esb-warn: #c9a82d;
+      --esb-radius: 10px; --esb-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      min-height: 844px; background: var(--esb-bg); color: var(--esb-text); font-size: 15px;
+      display: flex; flex-direction: column; position: relative; overflow: hidden;
+    }
+    .esb-app[data-theme="light"] {
+      --esb-bg: #f4f5f6; --esb-surface: #ffffff; --esb-surface-alt: #ecedef; --esb-hairline: #dee0e3;
+      --esb-text: #16181b; --esb-text-muted: #6b7078; --esb-text-faint: #8a8f96;
+      --esb-accent: #0c8c82; --esb-accent-text: #ffffff; --esb-danger: #d92d20;
+      --esb-shadow: 0 8px 24px rgba(16, 18, 20, 0.12);
+    }
+
+    .esb-topbar-m { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 16px 18px 4px; }
+    .esb-topbar-m .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+    .esb-page-title { margin: 10px 18px 14px; font-size: 1.2rem; }
+    .esb-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 999px; background: var(--esb-surface-alt); border: 1px solid var(--esb-hairline); color: var(--esb-text); flex: none; }
+
+    .esb-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 18px 190px; }
+
+    .esb-flow { display: grid; grid-template-columns: 26px 1fr; column-gap: 12px; }
+    .esb-flow-node { display: flex; flex-direction: column; align-items: center; }
+    .esb-flow-badge { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; background: var(--esb-surface-alt); color: var(--esb-text-muted); border: 1px solid var(--esb-hairline); flex: none; }
+    .esb-flow-badge.done { background: var(--esb-accent); color: var(--esb-accent-text); border-color: transparent; }
+    .esb-flow-badge.active { color: var(--esb-accent); border-color: var(--esb-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--esb-accent) 18%, transparent); }
+    .esb-flow-line { width: 2px; flex: 1; min-height: 22px; background: var(--esb-hairline); margin: 4px 0; }
+    .esb-flow-line.done { background: var(--esb-accent); }
+    .esb-flow-item { padding-bottom: 22px; }
+    .esb-flow-item:last-child .esb-flow-line { display: none; }
+
+    .esb-card { background: var(--esb-surface); border: 1px solid var(--esb-hairline); border-radius: var(--esb-radius); padding: 16px; box-shadow: var(--esb-shadow); }
+    .esb-card h2 { margin: 0 0 4px; font-size: 1rem; }
+    .esb-muted { color: var(--esb-text-muted); font-size: 0.86rem; margin: 0 0 12px; }
+    .esb-faint { color: var(--esb-text-faint); font-size: 0.8rem; }
+
+    .esb-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--esb-hairline); background: var(--esb-surface-alt); color: var(--esb-text); border-radius: 8px; padding: 9px 16px; font-size: 0.88rem; font-weight: 600; width: 100%; min-height: 46px; }
+    .esb-btn-primary { background: var(--esb-accent); color: var(--esb-accent-text); border-color: transparent; box-shadow: 0 4px 14px color-mix(in srgb, var(--esb-accent) 35%, transparent); }
+    .esb-btn-sm { padding: 6px 10px; font-size: 0.78rem; width: auto; min-height: 34px; }
+    .esb-btn-danger { background: transparent; color: var(--esb-danger); border-color: var(--esb-danger); }
+    .esb-btn-ghost { margin-top: 8px; }
+
+    .esb-device-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-top: 1px solid var(--esb-hairline); }
+    .esb-device-row:first-of-type { border-top: none; margin-top: 4px; }
+    .esb-device-row .lead { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .esb-device-row input[type="checkbox"] { width: 19px; height: 19px; accent-color: var(--esb-accent); flex: none; }
+    .esb-peer-target { margin-left: 22px; padding-left: 12px; border-left: 2px solid var(--esb-accent); }
+    .esb-badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 9px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; background: var(--esb-surface-alt); color: var(--esb-text-muted); flex: none; }
+    .esb-badge-ok { color: var(--esb-accent); }
+    .esb-badge-warn { color: var(--esb-warn); }
+    .esb-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+
+    .esb-field { margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .esb-field label { font-size: 0.78rem; color: var(--esb-text-muted); font-weight: 600; }
+    .esb-input, .esb-select, textarea.esb-input { background: var(--esb-surface-alt); border: 1px solid var(--esb-hairline); color: var(--esb-text); border-radius: 8px; padding: 9px 11px; font-size: 0.88rem; font-family: inherit; width: 100%; }
+    .esb-form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; margin-bottom: 4px; }
+    .esb-checkbox { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; padding: 5px 0; }
+    .esb-checkbox input { width: 17px; height: 17px; accent-color: var(--esb-accent); }
+
+    .esb-send-card { position: sticky; bottom: 6px; z-index: 5; }
+    .esb-send-count { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+
+    .esb-tabbar { flex: none; position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; overflow-x: auto; gap: 2px; padding: 8px 6px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--esb-surface); border-top: 1px solid var(--esb-hairline); }
+    .esb-tab { flex: 0 0 auto; min-width: 56px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 6px; border-radius: 8px; color: var(--esb-text-muted); }
+    .esb-tab svg { opacity: 0.8; }
+    .esb-tab span { font-size: 10px; font-weight: 600; letter-spacing: 0.01em; }
+    .esb-tab.active { color: var(--esb-accent); }
+    .esb-tab.active svg { opacity: 1; }
+  </style>
+</helmet>
+
+<div class="esb-app" data-theme="{{theme}}">
+  <div class="esb-topbar-m">
+    <div class="badges">
+      <span class="esb-badge esb-badge-ok"><span class="esb-badge-dot"></span>2 device(s) connected</span>
+      <span class="esb-badge esb-badge-ok">Full Auto Mode</span>
+    </div>
+    <button class="esb-icon-btn" type="button">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+  <h1 class="esb-page-title">Nearby Screens</h1>
+
+  <div class="esb-scroll">
+    <div class="esb-flow">
+
+      <div class="esb-flow-node">
+        <div class="esb-flow-badge done">✓</div>
+        <div class="esb-flow-line done"></div>
+      </div>
+      <div class="esb-flow-item">
+        <section class="esb-card">
+          <h2>1. Connect</h2>
+          <p class="esb-muted">Choose each nearby ESP display. Bluetooth requires Chrome on Android or desktop and an HTTPS connection.</p>
+          <button class="esb-btn esb-btn-primary" type="button">+ Add Bluetooth Screen</button>
+          <button class="esb-btn esb-btn-ghost" type="button">Refresh Paired Gateway Screens</button>
+
+          <div class="esb-device-row">
+            <input type="checkbox" checked />
+            <div class="lead"><strong>ESP-32 Pack Station</strong><span class="esb-faint">firmware v2.4.1</span></div>
+            <button class="esb-btn esb-btn-danger esb-btn-sm" type="button">Disconnect</button>
+          </div>
+          <div class="esb-device-row">
+            <input type="checkbox" checked />
+            <div class="lead"><strong>Line 3 Gateway</strong><span class="esb-faint">ESP-NOW screens through gateway</span></div>
+            <span class="esb-badge esb-badge-warn">Gateway</span>
+          </div>
+          <div class="esb-device-row esb-peer-target">
+            <input type="checkbox" />
+            <div class="lead"><strong>Dock Door 2</strong><span class="esb-faint">3C:71:BF · route 4 via Line 3 Gateway</span></div>
+            <span class="esb-badge esb-badge-ok">Paired</span>
+          </div>
+        </section>
+      </div>
+
+      <div class="esb-flow-node">
+        <div class="esb-flow-badge active">2</div>
+        <div class="esb-flow-line"></div>
+      </div>
+      <div class="esb-flow-item">
+        <section class="esb-card">
+          <h2>2. Barcode</h2>
+          <div class="esb-field">
+            <label>Import from photo</label>
+            <button class="esb-btn" type="button">Read Barcode Photo</button>
+          </div>
+          <div class="esb-form-row">
+            <div class="esb-field"><label>Type</label><select class="esb-select"><option>QR Code</option></select></div>
+            <div class="esb-field"><label>QR ECC</label><select class="esb-select"><option>M</option></select></div>
+            <div class="esb-field"><label>Rotation</label><select class="esb-select"><option>Auto</option></select></div>
+          </div>
+          <div class="esb-field"><label>Data</label><textarea class="esb-input" rows="3">LAB-TEST-001</textarea></div>
+          <div class="esb-form-row">
+            <div class="esb-field"><label>Quiet zone</label><input class="esb-input" type="number" value="4" /></div>
+            <div class="esb-field"><label>Minimum module pixels</label><input class="esb-input" type="number" value="3" /></div>
+          </div>
+          <label class="esb-checkbox"><input type="checkbox" /> Invert colors</label>
+          <label class="esb-checkbox"><input type="checkbox" /> Rectangular Data Matrix</label>
+          <label class="esb-checkbox"><input type="checkbox" /> MSI checksum</label>
+          <label class="esb-checkbox"><input type="checkbox" checked /> Display immediately</label>
+        </section>
+      </div>
+
+      <div class="esb-flow-node">
+        <div class="esb-flow-badge">3</div>
+      </div>
+      <div class="esb-flow-item">
+        <section class="esb-card esb-send-card">
+          <h2>3. Send</h2>
+          <div class="esb-send-count"><span class="esb-muted" style="margin:0;">2 selected screen(s)</span></div>
+          <button class="esb-btn esb-btn-primary" type="button">Send to Selected Screens</button>
+        </section>
+      </div>
+
+    </div>
+  </div>
+
+  <nav class="esb-tabbar">
+    <a class="esb-tab" href="#"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M12 20V4M20 20v-7"/></svg><span>Dashboard</span></a>
+    <a class="esb-tab" href="#"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v4M15 2v4M7 6h10v4a5 5 0 0 1-5 5 5 5 0 0 1-5-5V6z"/><path d="M12 15v4M9 22h6"/></svg><span>Devices</span></a>
+    <a class="esb-tab active" href="#"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg><span>Wireless</span></a>
+    <a class="esb-tab" href="#"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11V5a2 2 0 0 1 2-2h6l10 10-8 8L3 11z"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/></svg><span>Generator</span></a>
+    <a class="esb-tab" href="#"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></svg><span>Library</span></a>
+    <a class="esb-tab" href="#"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V10M8 20h8M9 6a3 3 0 0 1 6 0M6 3a7 7 0 0 1 12 0"/><circle cx="12" cy="6" r="1.3" fill="currentColor" stroke="none"/></svg><span>Gateway</span></a>
+    <a class="esb-tab" href="#"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="2"/><path d="M12 8V4M9 4h6"/><circle cx="9" cy="13" r="1.1" fill="currentColor" stroke="none"/><circle cx="15" cy="13" r="1.1" fill="currentColor" stroke="none"/><path d="M9 17h6"/></svg><span>Automation</span></a>
+    <a class="esb-tab" href="#"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.96 19a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.96a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.04-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.56 1.04H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15z"/></svg><span>Settings</span></a>
+  </nav>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'dark' };
+  }
+}
+</script>
+</body>
+</html>
