@@ -114,7 +114,7 @@
             }
         }
 
-        @foreach (var gateway in Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay))
+        @foreach (var gateway in Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay && d.GatewayLink is not null))
         {
             <div style="margin-top:10px;">
                 <label class="esb-checkbox" style="margin-bottom:6px;">
@@ -162,7 +162,7 @@
 
     <div class="esb-card">
         <h2>Preview</h2>
-        <p class="esb-faint">Downloaded live from the first target device after generating — pixel-accurate to the panel.</p>
+        <p class="esb-faint">Downloaded live from wired targets after generating, pixel-accurate to the panel; other connection types show a summary until they support the same download.</p>
         <div class="esb-preview">
             <canvas id="generator-preview-canvas" width="240" height="240" data-testid="generator-preview"></canvas>
         </div>
@@ -190,7 +190,7 @@
     private List<GenerationTarget> AllTargets()
     {
         var targets = TargetProvider.GetImmediateTargets().ToList();
-        foreach (var gateway in Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay))
+        foreach (var gateway in Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay && d.GatewayLink is not null))
         {
             targets.Add(TargetProvider.GetGatewayDirectTarget(gateway));
             if (_gatewayPeerTargets.TryGetValue(gateway.Id, out var peers)) targets.AddRange(peers);
@@ -285,23 +285,21 @@
             : $"Generated on {succeeded} device(s); failed on {string.Join("; ", failures)}";
         _isError = failures.Count > 0 && succeeded == 0;
 
-        if (firstOk is not null && options.Display)
+        if (firstOkResult is not null)
         {
-            if (firstOk.DownloadPreviewAsync is not null)
+            _resultSummary = firstOkResult;
+        }
+
+        if (firstOk is not null && options.Display && firstOk.DownloadPreviewAsync is not null)
+        {
+            try
             {
-                try
-                {
-                    var matrix = await firstOk.DownloadPreviewAsync(CancellationToken.None);
-                    await Renderer.RenderAsync("generator-preview-canvas", matrix);
-                }
-                catch
-                {
-                    // Preview is best-effort; the push itself already succeeded/failed above.
-                }
+                var matrix = await firstOk.DownloadPreviewAsync(CancellationToken.None);
+                await Renderer.RenderAsync("generator-preview-canvas", matrix);
             }
-            else
+            catch
             {
-                _resultSummary = firstOkResult;
+                // Preview is best-effort; the push itself already succeeded/failed above.
             }
         }
 

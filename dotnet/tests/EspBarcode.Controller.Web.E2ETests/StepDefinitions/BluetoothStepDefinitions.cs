@@ -35,7 +35,6 @@ public sealed class BluetoothStepDefinitions(TestWorld world)
     {
         await Page.Locator("[data-testid=bluetooth-device-card]").First
             .GetByText("Disconnect", new LocatorGetByTextOptions { Exact = true }).ClickAsync();
-        await Task.Delay(200);
     }
 
     [Then("the device list shows {int} connected Bluetooth screen(s)")]

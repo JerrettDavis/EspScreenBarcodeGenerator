@@ -51,8 +51,8 @@ public sealed class GenerationTargetProvider(DeviceRegistry wired, BluetoothDevi
 
     /// <summary>
     /// A wired Gateway-relay device itself, addressed directly (routeId 0) — the same target
-    /// Wireless.razor's "wired:{id}" send path already used for a connected Gateway-relay board;
-    /// semantics unchanged, just centralized here.
+    /// the app's former mobile wireless page's "wired:{id}" send path already used for a connected
+    /// Gateway-relay board; semantics unchanged, just centralized here.
     /// </summary>
     public GenerationTarget GetGatewayDirectTarget(DeviceConnection gateway)
     {
@@ -68,8 +68,8 @@ public sealed class GenerationTargetProvider(DeviceRegistry wired, BluetoothDevi
     /// <summary>
     /// One gateway's trusted ESP-NOW peers, addressed by routeId. The caller decides when to fetch
     /// <paramref name="peers"/> (an explicit <c>GatewayLinkClient.ListTrustedPeersAsync</c> round trip) —
-    /// this only turns already-fetched peers into targets, matching Wireless.razor's
-    /// "Refresh Paired Gateway Screens" button today.
+    /// this only turns already-fetched peers into targets, matching the app's former mobile wireless
+    /// page's "Refresh Paired Gateway Screens" button.
     /// </summary>
     public IReadOnlyList<GenerationTarget> BuildPeerTargets(DeviceConnection gateway, IReadOnlyList<TrustedPeer> peers)
     {
