@@ -969,7 +969,7 @@ Add to `GeneratorStepDefinitions.cs`:
         => await Assertions.Expect(Page.Locator("[data-testid=generator-data]")).ToHaveValueAsync(data);
 ```
 
-Remove `GivenOpenWithBluetoothScreens`, `WhenIOpenUnifiedController`, `WhenIEnterData`, `WhenIUploadPhoto`, `ThenTypeIs`, `ThenDataIs` from `WirelessStepDefinitions.cs` — every method in that file should now be gone; leave the empty `[Binding] public sealed class WirelessStepDefinitions(TestWorld world) { private IPage Page => world.Page; }` shell (Task 6 deletes the file entirely).
+Remove `GivenOpenWithBluetoothScreens`, `WhenIOpenUnifiedController`, `WhenIEnterData`, `WhenISend`, `WhenIUploadPhoto`, `ThenTypeIs`, `ThenDataIs` from `WirelessStepDefinitions.cs` — every method in that file should now be gone (`WhenIEnterData`/`WhenISend` were already unused after Task 3 removed the last scenarios that called them; this is where they're deleted). Leave the empty `[Binding] public sealed class WirelessStepDefinitions(TestWorld world) { private IPage Page => world.Page; }` shell (Task 6 deletes the file entirely).
 
 - [ ] **Step 2: Run the test to verify it fails**
 
