@@ -107,6 +107,34 @@
             }
         }
 
+        @foreach (var gateway in Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay))
+        {
+            <div style="margin-top:10px;">
+                <label class="esb-checkbox" style="margin-bottom:6px;">
+                    <input type="checkbox" data-testid="generator-target-checkbox" data-kind="gatewaydirect"
+                           checked="@_targets.Contains($"wired:{gateway.Id}")"
+                           @onchange="@(e => ToggleTarget($"wired:{gateway.Id}", (bool)e.Value!))" />
+                    @gateway.Nickname <span class="esb-faint">(Wired — gateway)</span>
+                </label>
+                <button class="esb-btn esb-btn-sm" type="button" data-testid="refresh-gateway-targets"
+                        @onclick="@(() => RefreshGatewayTargetsAsync(gateway))">
+                    Refresh Paired Gateway Screens
+                </button>
+                @if (_gatewayPeerTargets.TryGetValue(gateway.Id, out var peerTargets))
+                {
+                    @foreach (var peer in peerTargets)
+                    {
+                        <label class="esb-checkbox" style="margin:6px 0 0 20px; padding-left:12px; border-left:2px solid var(--esb-accent);">
+                            <input type="checkbox" data-testid="generator-target-checkbox" data-kind="gatewaypeer"
+                                   checked="@_targets.Contains(peer.Id)"
+                                   @onchange="@(e => ToggleTarget(peer.Id, (bool)e.Value!))" />
+                            @peer.DisplayName <span class="esb-faint">(Gateway peer)</span>
+                        </label>
+                    }
+                }
+            </div>
+        }
+
         <div class="esb-btn-row" style="margin-top:16px;">
             <button class="esb-btn esb-btn-primary" type="button" data-testid="generate-and-push"
                     disabled="@(_busy || _targets.Count == 0 || string.IsNullOrWhiteSpace(_options.Data))"
@@ -143,11 +171,35 @@
 @code {
     private readonly GenerateOptions _options = new();
     private readonly HashSet<string> _targets = [];
+    private readonly Dictionary<string, IReadOnlyList<GenerationTarget>> _gatewayPeerTargets = [];
     private string? _saveAsName;
     private bool _busy;
     private string? _message;
     private bool _isError;
     private GenerateResult? _resultSummary;
+
+    private List<GenerationTarget> AllTargets()
+    {
+        var targets = TargetProvider.GetImmediateTargets().ToList();
+        foreach (var gateway in Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.GatewayRelay))
+        {
+            targets.Add(TargetProvider.GetGatewayDirectTarget(gateway));
+            if (_gatewayPeerTargets.TryGetValue(gateway.Id, out var peers)) targets.AddRange(peers);
+        }
+        return targets;
+    }
+
+    private async Task RefreshGatewayTargetsAsync(DeviceConnection gateway)
+    {
+        _busy = true;
+        try
+        {
+            var peers = await gateway.GatewayLink!.ListTrustedPeersAsync();
+            _gatewayPeerTargets[gateway.Id] = TargetProvider.BuildPeerTargets(gateway, peers);
+        }
+        catch (Exception ex) { _message = ex.Message; _isError = true; }
+        finally { _busy = false; }
+    }
 
     private static string KindLabel(GenerationTargetKind kind) => kind switch
     {
@@ -184,7 +236,7 @@
         GenerationTarget? firstOk = null;
         GenerateResult? firstOkResult = null;
 
-        foreach (var target in TargetProvider.GetImmediateTargets().Where(t => _targets.Contains(t.Id)))
+        foreach (var target in AllTargets().Where(t => _targets.Contains(t.Id)))
         {
             try
             {

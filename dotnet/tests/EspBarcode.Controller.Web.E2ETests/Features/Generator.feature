@@ -26,3 +26,18 @@ Feature: Barcode generator
     And I select the second Bluetooth generator target
     And I click Generate & Push
     Then the generator reports it pushed to 2 device(s)
+
+  Scenario: Sending through a wired ESP-NOW gateway to itself
+    Given I put the first device into gateway mode
+    When I set the generator type to "Qr" and data to "GATEWAY-DIRECT-001"
+    And I select the gateway generator target
+    And I click Generate & Push
+    Then the generator reports it pushed to 1 device(s)
+
+  Scenario: Addressing one paired screen through its gateway route
+    Given a gateway has a paired screen on route 7
+    When I set the generator type to "Qr" and data to "ROUTED-SCREEN-007"
+    And I refresh paired gateway screens on the generator
+    And I select the first paired gateway generator target
+    And I click Generate & Push
+    Then the generator reports it pushed to 1 device(s)

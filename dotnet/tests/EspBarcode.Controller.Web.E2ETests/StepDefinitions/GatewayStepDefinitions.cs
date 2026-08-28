@@ -113,4 +113,20 @@ public class GatewayStepDefinitions(TestWorld world)
     [Then("the Gateway page shows a pairing code for that device")]
     public async Task ThenGatewayShowsPairingCode()
         => await Assertions.Expect(Page.Locator("[data-testid=gateway-pairing-code]").First).ToBeVisibleAsync();
+
+    [Given("a gateway has a paired screen on route 7")]
+    public async Task GivenGatewayHasRoutedScreen()
+    {
+        await world.ConfigureFakeDevicesAsync(2, trustedPeers:
+            [new { fingerprint = "ROUTE-0007", mac = "AA:BB:CC:DD:EE:07", route_id = 7, paired_at_ms = 10, label = "Lab Screen 7" }],
+            requiredRouteId: 7);
+        await Page.GoToSpaAsync("devices", "Devices");
+        await Page.Locator("[data-testid=reconnect-authorized]").ClickAsync();
+        await Assertions.Expect(Page.Locator("[data-testid=device-card]")).ToHaveCountAsync(2);
+        var firstCard = Page.Locator("[data-testid=device-card]").First;
+        await firstCard.Locator("[data-testid=enter-gateway]").ClickAsync();
+        await Assertions.Expect(firstCard.GetByText("Gateway relay")).ToBeVisibleAsync();
+        await Page.GoToSpaAsync("gateway", "Gateway");
+        await Assertions.Expect(Page.Locator("[data-testid=gateway-card]")).ToHaveCountAsync(1);
+    }
 }

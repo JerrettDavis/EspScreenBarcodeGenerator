@@ -29,6 +29,18 @@ public class GeneratorStepDefinitions(TestWorld world)
     public async Task WhenISelectSecondBluetoothTarget()
         => await Page.Locator("[data-testid=generator-target-checkbox][data-kind=bluetooth]").Nth(1).CheckAsync();
 
+    [When("I select the gateway generator target")]
+    public async Task WhenISelectGatewayDirectTarget()
+        => await Page.Locator("[data-testid=generator-target-checkbox][data-kind=gatewaydirect]").First.CheckAsync();
+
+    [When("I refresh paired gateway screens on the generator")]
+    public async Task WhenIRefreshPairedGatewayScreens()
+        => await Page.Locator("[data-testid=refresh-gateway-targets]").ClickAsync();
+
+    [When("I select the first paired gateway generator target")]
+    public async Task WhenISelectPairedGatewayTarget()
+        => await Page.Locator("[data-testid=generator-target-checkbox][data-kind=gatewaypeer]").First.CheckAsync();
+
     [When("I click Generate & Push")]
     public async Task WhenIClickGenerateAndPush()
     {
