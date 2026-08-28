@@ -3,12 +3,6 @@ Feature: Mobile wireless control
   I want to select nearby Bluetooth screens and import barcode photos
   So that I can update one or more displays without a cable
 
-  Scenario: The controller is installable and uses mobile navigation
-    Given the controller app is open with fake Bluetooth screens
-    When I resize the controller to a phone viewport
-    Then the PWA manifest is linked
-    And navigation is docked to the bottom of the phone viewport
-
   Scenario: Sending a barcode to two nearby Bluetooth screens
     Given the controller app is open with fake Bluetooth screens
     When I connect two nearby Bluetooth screens

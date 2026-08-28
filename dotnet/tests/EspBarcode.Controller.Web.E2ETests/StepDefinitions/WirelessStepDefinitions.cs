@@ -28,27 +28,6 @@ public sealed class WirelessStepDefinitions(TestWorld world)
         await Assertions.Expect(Page.Locator("[data-testid=gateway-card]")).ToHaveCountAsync(1);
     }
 
-    [When("I resize the controller to a phone viewport")]
-    public async Task WhenIResizeToPhone() => await Page.SetViewportSizeAsync(390, 844);
-
-    [Then("the PWA manifest is linked")]
-    public async Task ThenManifestIsLinked()
-    {
-        await Assertions.Expect(Page.Locator("link[rel=manifest]")).ToHaveAttributeAsync("href", "manifest.webmanifest");
-        var response = await Page.APIRequest.GetAsync(AppServer.BaseUrl + "/manifest.webmanifest");
-        Xunit.Assert.True(response.Ok, "expected the PWA manifest to be served");
-        var manifest = await response.TextAsync();
-        Xunit.Assert.Contains("\"sizes\": \"192x192\"", manifest);
-        Xunit.Assert.Contains("\"sizes\": \"512x512\"", manifest);
-    }
-
-    [Then("navigation is docked to the bottom of the phone viewport")]
-    public async Task ThenNavigationIsBottomDocked()
-    {
-        var nav = Page.Locator(".esb-sidebar"); var box = await nav.BoundingBoxAsync();
-        Xunit.Assert.NotNull(box); Xunit.Assert.InRange(box!.Y + box.Height, 842, 846);
-    }
-
     [When("I open the unified wireless controller")]
     public async Task WhenIOpenUnifiedController() => await Page.GoToSpaAsync("wireless", "Nearby Screens");
 

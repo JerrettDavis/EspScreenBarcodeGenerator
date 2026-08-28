@@ -103,5 +103,26 @@ public class DeviceStepDefinitions(TestWorld world)
         Assert.Fail($"no device named '{name}' found");
     }
 
+    [When("I resize the controller to a phone viewport")]
+    public async Task WhenIResizeToPhone() => await Page.SetViewportSizeAsync(390, 844);
+
+    [Then("the PWA manifest is linked")]
+    public async Task ThenManifestIsLinked()
+    {
+        await Assertions.Expect(Page.Locator("link[rel=manifest]")).ToHaveAttributeAsync("href", "manifest.webmanifest");
+        var response = await Page.APIRequest.GetAsync(AppServer.BaseUrl + "/manifest.webmanifest");
+        Assert.True(response.Ok, "expected the PWA manifest to be served");
+        var manifest = await response.TextAsync();
+        Assert.Contains("\"sizes\": \"192x192\"", manifest);
+        Assert.Contains("\"sizes\": \"512x512\"", manifest);
+    }
+
+    [Then("navigation is docked to the bottom of the phone viewport")]
+    public async Task ThenNavigationIsBottomDocked()
+    {
+        var nav = Page.Locator(".esb-sidebar"); var box = await nav.BoundingBoxAsync();
+        Assert.NotNull(box); Assert.InRange(box!.Y + box.Height, 842, 846);
+    }
+
     private async Task GotoDevicesAsync() => await Page.GoToSpaAsync("devices", "Devices");
 }
