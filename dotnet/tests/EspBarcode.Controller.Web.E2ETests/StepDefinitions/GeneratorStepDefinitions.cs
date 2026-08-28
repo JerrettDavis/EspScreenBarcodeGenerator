@@ -21,6 +21,14 @@ public class GeneratorStepDefinitions(TestWorld world)
     public async Task WhenISelectFirstDeviceAsTarget()
         => await Page.Locator("[data-testid=generator-target-checkbox]").First.CheckAsync();
 
+    [When("I select the first Bluetooth generator target")]
+    public async Task WhenISelectFirstBluetoothTarget()
+        => await Page.Locator("[data-testid=generator-target-checkbox][data-kind=bluetooth]").Nth(0).CheckAsync();
+
+    [When("I select the second Bluetooth generator target")]
+    public async Task WhenISelectSecondBluetoothTarget()
+        => await Page.Locator("[data-testid=generator-target-checkbox][data-kind=bluetooth]").Nth(1).CheckAsync();
+
     [When("I click Generate & Push")]
     public async Task WhenIClickGenerateAndPush()
     {
@@ -39,6 +47,11 @@ public class GeneratorStepDefinitions(TestWorld world)
     [Then("the generator reports success")]
     public async Task ThenGeneratorReportsSuccess()
         => await Assertions.Expect(Page.Locator("[data-testid=generator-message]")).ToContainTextAsync("Generated");
+
+    [Then("the generator reports it pushed to {int} device\\(s\\)")]
+    public async Task ThenGeneratorReportsPushedTo(int count)
+        => await Assertions.Expect(Page.Locator("[data-testid=generator-message]"))
+            .ToContainTextAsync($"Generated and pushed to {count} device(s).");
 
     [Then("a live preview is rendered")]
     public async Task ThenLivePreviewIsRendered()

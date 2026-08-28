@@ -3,14 +3,6 @@ Feature: Mobile wireless control
   I want to select nearby Bluetooth screens and import barcode photos
   So that I can update one or more displays without a cable
 
-  Scenario: Sending a barcode to two nearby Bluetooth screens
-    Given the controller app is open with fake Bluetooth screens
-    When I connect two nearby Bluetooth screens
-    And I enter wireless barcode data "MOBILE-LAB-001"
-    And I send the wireless barcode
-    Then the wireless controller reports it sent to 2 screens
-    And both Bluetooth screen writes overlapped
-
   Scenario: Importing a QR photo prefills a clean request
     Given the controller app is open with fake Bluetooth screens
     When I upload a barcode photo

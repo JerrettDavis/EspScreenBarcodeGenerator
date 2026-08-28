@@ -18,3 +18,11 @@ Feature: Barcode generator
     When I set the generator type to "Code128" and data to "LOT-2026-00042"
     And I save the generator spec to the library as "Lot Sample"
     Then the library contains an item named "Lot Sample"
+
+  Scenario: Sending a barcode to two nearby Bluetooth screens
+    Given I connect two Bluetooth screens from Devices
+    When I set the generator type to "Qr" and data to "MOBILE-LAB-001"
+    And I select the first Bluetooth generator target
+    And I select the second Bluetooth generator target
+    And I click Generate & Push
+    Then the generator reports it pushed to 2 device(s)

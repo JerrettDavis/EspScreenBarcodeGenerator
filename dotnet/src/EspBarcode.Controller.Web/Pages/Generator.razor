@@ -1,6 +1,8 @@
 @page "/generator"
 @implements IDisposable
 @inject DeviceRegistry Devices
+@inject BluetoothDeviceRegistry Bluetooth
+@inject GenerationTargetProvider TargetProvider
 @inject BarcodeLibraryService Library
 @inject BarcodeCanvasRenderer Renderer
 
@@ -87,18 +89,20 @@
         </div>
 
         <h3>Target Devices</h3>
-        @if (ClientDevices.Count == 0)
+        @{ var immediateTargets = TargetProvider.GetImmediateTargets(); }
+        @if (immediateTargets.Count == 0)
         {
-            <p class="esb-muted">No client-mode devices connected. Go to <a href="devices">Devices</a> first.</p>
+            <p class="esb-muted">No devices connected. Go to <a href="devices">Devices</a> first.</p>
         }
         else
         {
-            @foreach (var device in ClientDevices)
+            @foreach (var target in immediateTargets)
             {
                 <label class="esb-checkbox" style="margin-bottom:6px;">
-                    <input type="checkbox" data-testid="generator-target-checkbox" checked="@_targets.Contains(device.Id)"
-                           @onchange="@(e => ToggleTarget(device.Id, (bool)e.Value!))" />
-                    @device.Nickname
+                    <input type="checkbox" data-testid="generator-target-checkbox" data-kind="@target.Kind.ToString().ToLowerInvariant()"
+                           checked="@_targets.Contains(target.Id)"
+                           @onchange="@(e => ToggleTarget(target.Id, (bool)e.Value!))" />
+                    @target.DisplayName <span class="esb-faint">(@KindLabel(target.Kind))</span>
                 </label>
             }
         }
@@ -127,10 +131,10 @@
         <div class="esb-preview">
             <canvas id="generator-preview-canvas" width="240" height="240" data-testid="generator-preview"></canvas>
         </div>
-        @if (_lastResult is not null)
+        @if (_resultSummary is not null)
         {
-            <p class="esb-muted" style="margin-top:10px;">
-                @_lastResult.Width×@_lastResult.Height modules · normalized "@_lastResult.NormalizedData"
+            <p class="esb-muted" style="margin-top:10px;" data-testid="generator-result-summary">
+                @_resultSummary.Width×@_resultSummary.Height modules · normalized "@_resultSummary.NormalizedData"
             </p>
         }
     </div>
@@ -143,12 +147,20 @@
     private bool _busy;
     private string? _message;
     private bool _isError;
-    private GenerateResult? _lastResult;
+    private GenerateResult? _resultSummary;
 
-    private List<DeviceConnection> ClientDevices =>
-        Devices.Devices.Where(d => d.IsConnected && d.Mode == DeviceMode.Client).ToList();
+    private static string KindLabel(GenerationTargetKind kind) => kind switch
+    {
+        GenerationTargetKind.Bluetooth => "Bluetooth",
+        GenerationTargetKind.GatewayPeer => "Gateway peer",
+        _ => "Wired",
+    };
 
-    protected override void OnInitialized() => Devices.Changed += OnChanged;
+    protected override void OnInitialized()
+    {
+        Devices.Changed += OnChanged;
+        Bluetooth.Changed += OnChanged;
+    }
 
     private async void OnChanged() => await InvokeAsync(StateHasChanged);
 
@@ -163,24 +175,26 @@
         _busy = true;
         _message = null;
         _isError = false;
+        _resultSummary = null;
         var options = _options.Clone();
         options.SaveAs = string.IsNullOrWhiteSpace(_saveAsName) ? null : _saveAsName;
 
         var succeeded = 0;
         var failures = new List<string>();
-        DeviceConnection? firstOk = null;
+        GenerationTarget? firstOk = null;
+        GenerateResult? firstOkResult = null;
 
-        foreach (var device in Devices.Devices.Where(d => _targets.Contains(d.Id)))
+        foreach (var target in TargetProvider.GetImmediateTargets().Where(t => _targets.Contains(t.Id)))
         {
             try
             {
-                _lastResult = await device.Client.GenerateAsync(options);
+                var result = await target.SendAsync(options, CancellationToken.None);
                 succeeded++;
-                firstOk ??= device;
+                if (firstOk is null) { firstOk = target; firstOkResult = result; }
             }
             catch (Exception ex)
             {
-                failures.Add($"{device.Nickname}: {ex.Message}");
+                failures.Add($"{target.DisplayName}: {ex.Message}");
             }
         }
 
@@ -191,14 +205,21 @@
 
         if (firstOk is not null && options.Display)
         {
-            try
+            if (firstOk.DownloadPreviewAsync is not null)
             {
-                var matrix = await firstOk.Client.DownloadCurrentMatrixAsync();
-                await Renderer.RenderAsync("generator-preview-canvas", matrix);
+                try
+                {
+                    var matrix = await firstOk.DownloadPreviewAsync(CancellationToken.None);
+                    await Renderer.RenderAsync("generator-preview-canvas", matrix);
+                }
+                catch
+                {
+                    // Preview is best-effort; the push itself already succeeded/failed above.
+                }
             }
-            catch
+            else
             {
-                // Preview is best-effort; the push itself already succeeded/failed above.
+                _resultSummary = firstOkResult;
             }
         }
 
@@ -217,5 +238,9 @@
         _isError = false;
     }
 
-    public void Dispose() => Devices.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Devices.Changed -= OnChanged;
+        Bluetooth.Changed -= OnChanged;
+    }
 }

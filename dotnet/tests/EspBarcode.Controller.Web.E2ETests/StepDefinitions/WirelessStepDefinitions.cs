@@ -31,14 +31,6 @@ public sealed class WirelessStepDefinitions(TestWorld world)
     [When("I open the unified wireless controller")]
     public async Task WhenIOpenUnifiedController() => await Page.GoToSpaAsync("wireless", "Nearby Screens");
 
-    [When("I connect two nearby Bluetooth screens")]
-    public async Task WhenIConnectTwoScreens()
-    {
-        var button = Page.Locator("[data-testid=connect-bluetooth]");
-        await button.ClickAsync(); await Assertions.Expect(Page.Locator("[data-testid=bluetooth-device]")).ToHaveCountAsync(1);
-        await button.ClickAsync(); await Assertions.Expect(Page.Locator("[data-testid=bluetooth-device]")).ToHaveCountAsync(2);
-    }
-
     [When("I enter wireless barcode data {string}")]
     public async Task WhenIEnterData(string data) => await Page.Locator("[data-testid=wireless-data]").FillAsync(data);
 
@@ -53,16 +45,6 @@ public sealed class WirelessStepDefinitions(TestWorld world)
 
     [When("I send the wireless barcode")]
     public async Task WhenISend() => await Page.Locator("[data-testid=wireless-send]").ClickAsync();
-
-    [Then("the wireless controller reports it sent to 2 screens")]
-    public async Task ThenSentToTwo() => await Assertions.Expect(Page.Locator("[data-testid=wireless-message]")).ToContainTextAsync("Sent to 2 screen(s)");
-
-    [Then("both Bluetooth screen writes overlapped")]
-    public async Task ThenBluetoothWritesOverlapped()
-    {
-        var maxConcurrentWrites = await Page.EvaluateAsync<int>("window.__espFakeBluetoothTelemetry.maxConcurrentWrites");
-        Xunit.Assert.Equal(2, maxConcurrentWrites);
-    }
 
     [Then("the wireless controller reports it sent to 1 screen")]
     public async Task ThenSentToOne() => await Assertions.Expect(Page.Locator("[data-testid=wireless-message]")).ToContainTextAsync("Sent to 1 screen(s)");

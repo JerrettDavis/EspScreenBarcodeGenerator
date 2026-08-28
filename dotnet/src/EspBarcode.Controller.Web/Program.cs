@@ -13,6 +13,7 @@ builder.Services.AddSingleton<BluetoothDeviceRegistry>();
 builder.Services.AddSingleton<BarcodeImportService>();
 builder.Services.AddSingleton<LocalStorageService>();
 builder.Services.AddSingleton<DeviceRegistry>();
+builder.Services.AddSingleton<GenerationTargetProvider>();
 builder.Services.AddSingleton<BarcodeLibraryService>();
 builder.Services.AddSingleton<ThemeService>();
 builder.Services.AddSingleton<AutomationService>();
