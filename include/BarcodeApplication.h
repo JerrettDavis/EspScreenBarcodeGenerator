@@ -206,6 +206,9 @@ private:
     uint8_t batteryPercent_ = 100;
     float batteryVoltage_ = 0.0f;
     uint8_t lastDrawnBatteryPercent_ = 255;  // sentinel: forces the first draw to happen
+    // Tracks the charging glyph's last-drawn state so pollBattery() also redraws when
+    // BatteryMonitor::likelyExternalPower() flips but the percent happens not to change.
+    bool lastDrawnBatteryCharging_ = false;
     uint32_t batteryPollAt_ = 0;
     esplink::ScreenOrientation appliedOrientation_ = esplink::ScreenOrientation::Deg90;
     espbarcode::BarcodeSpec spec_;

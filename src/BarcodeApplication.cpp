@@ -201,6 +201,17 @@ void iconBattery(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg, u
     if (fillW > 0) g.fillRect(static_cast<int16_t>(x0 + 2 + innerW - fillW), static_cast<int16_t>(y0 + 2), fillW, h - 4, fillColor);
 }
 
+// Small lightning-bolt glyph, drawn between the battery icon and the percent label
+// whenever BatteryMonitor::likelyExternalPower() says external power is present.
+void iconChargingBolt(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c) {
+    g.fillTriangle(static_cast<int16_t>(cx + 1), static_cast<int16_t>(cy - 5),
+                   static_cast<int16_t>(cx + 4), static_cast<int16_t>(cy - 5),
+                   static_cast<int16_t>(cx - 1), static_cast<int16_t>(cy + 1), c);
+    g.fillTriangle(static_cast<int16_t>(cx - 1), static_cast<int16_t>(cy + 1),
+                   static_cast<int16_t>(cx + 2), static_cast<int16_t>(cy + 1),
+                   static_cast<int16_t>(cx - 2), static_cast<int16_t>(cy + 5), c);
+}
+
 void iconRestart(TFT_eSPI& g, int16_t cx, int16_t cy, uint16_t c, uint16_t bg) {
     g.drawCircle(cx, cy, 6, c);
     g.drawCircle(cx, cy, 5, c);
@@ -258,10 +269,10 @@ Rect homeChipRect(uint16_t width, uint16_t height) {
 
 // Battery badge sits in the gap between the symbology chip and the save-icon/theme-toggle
 // cluster on the right -- there's ~150-220px of unused space there depending on
-// orientation, plenty for a small icon + "NN%" at font size 1.
+// orientation, plenty for a small icon + charging bolt + "NN%" at font size 1.
 Rect homeBatteryBadgeRect(uint16_t width, uint16_t height) {
     const Rect chip = homeChipRect(width, height);
-    return Rect{static_cast<int16_t>(chip.x + chip.w + 8), 0, 48, homeTopBarHeight(width, height)};
+    return Rect{static_cast<int16_t>(chip.x + chip.w + 8), 0, 58, homeTopBarHeight(width, height)};
 }
 
 // ---- Data preview card ----
@@ -341,7 +352,7 @@ Rect subHeaderToggleRect(uint16_t width, uint16_t height) {
 // Battery badge sits just left of the theme toggle, on every subHeader-based screen.
 Rect subHeaderBatteryBadgeRect(uint16_t width, uint16_t height) {
     const Rect toggle = subHeaderToggleRect(width, height);
-    const int16_t w = 48;
+    const int16_t w = 58;
     return Rect{static_cast<int16_t>(toggle.x - w - 6), 0, w, subHeaderHeight(width, height)};
 }
 
@@ -828,15 +839,21 @@ void BarcodeApplication::drawBatteryBadge(const Rect& rect) {
     const Theme& th = theme();
     tft_.fillRect(rect.x, rect.y, rect.w, rect.h, th.bg);
     if (!config_.showBatteryPercent()) return;
-    const uint16_t fillColor = batteryPercent_ <= 15 ? th.danger : th.textMuted;
+    const bool charging = BatteryMonitor::likelyExternalPower(batteryVoltage_);
+    const uint16_t fillColor = batteryPercent_ <= 10 ? th.danger : th.textMuted;
     const int16_t iconCx = static_cast<int16_t>(rect.x + 10);
     const int16_t iconCy = static_cast<int16_t>(rect.y + rect.h / 2);
     iconBattery(tft_, iconCx, iconCy, th.textMuted, th.bg, fillColor, batteryPercent_);
+    int16_t labelX = static_cast<int16_t>(rect.x + 22);
+    if (charging) {
+        iconChargingBolt(tft_, static_cast<int16_t>(rect.x + 25), iconCy, th.accent);
+        labelX = static_cast<int16_t>(rect.x + 32);
+    }
     char label[6];
     std::snprintf(label, sizeof(label), "%u%%", batteryPercent_);
     tft_.setTextDatum(ML_DATUM);
     tft_.setTextColor(th.textMuted, th.bg);
-    tft_.drawString(label, static_cast<int16_t>(rect.x + 22), iconCy, 1);
+    tft_.drawString(label, labelX, iconCy, 1);
 }
 
 void BarcodeApplication::redrawBatteryBadge() {
@@ -868,8 +885,10 @@ void BarcodeApplication::pollBattery() {
     batteryPollAt_ = now;
     batteryVoltage_ = battery_.readVoltageVolts();
     batteryPercent_ = battery_.readPercent();
-    if (batteryPercent_ == lastDrawnBatteryPercent_) return;
+    const bool charging = BatteryMonitor::likelyExternalPower(batteryVoltage_);
+    if (batteryPercent_ == lastDrawnBatteryPercent_ && charging == lastDrawnBatteryCharging_) return;
     lastDrawnBatteryPercent_ = batteryPercent_;
+    lastDrawnBatteryCharging_ = charging;
     redrawBatteryBadge();
     if (view_ == View::Storage) drawStorageBatteryRow();
 }
@@ -2185,7 +2204,7 @@ void BarcodeApplication::drawStorageBatteryRow() {
     const Rect battRow = storageStatusRowRect(width, static_cast<int16_t>(sdRow.y + sdRow.h + 24));
     tft_.fillRoundRect(battRow.x, battRow.y, battRow.w, battRow.h, 10, th.surface);
     tft_.drawRoundRect(battRow.x, battRow.y, battRow.w, battRow.h, 10, th.hairline);
-    const uint16_t dotColor = batteryPercent_ <= 15 ? th.danger : th.accent;
+    const uint16_t dotColor = batteryPercent_ <= 10 ? th.danger : th.accent;
     tft_.fillCircle(static_cast<int16_t>(battRow.x + 16), static_cast<int16_t>(battRow.y + battRow.h / 2), 4, dotColor);
     tft_.setTextDatum(ML_DATUM);
     tft_.setTextColor(th.text, th.surface);
