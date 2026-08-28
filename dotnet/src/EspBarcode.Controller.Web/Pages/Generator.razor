@@ -5,6 +5,7 @@
 @inject GenerationTargetProvider TargetProvider
 @inject BarcodeLibraryService Library
 @inject BarcodeCanvasRenderer Renderer
+@inject BarcodeImportService Importer
 
 <PageTitle>Generator - ESP Barcode Control</PageTitle>
 
@@ -13,6 +14,12 @@
 <div style="display:grid; grid-template-columns: minmax(320px, 1fr) 320px; gap:20px; align-items:start;">
     <div class="esb-card">
         <h2>Barcode Spec</h2>
+
+        <div class="esb-field">
+            <label for="gen-photo">Import from photo</label>
+            <input id="gen-photo" @ref="_imageInput" type="file" accept="image/*" capture="environment" data-testid="barcode-photo" />
+            <button class="esb-btn" type="button" disabled="@(!_importSupported || _busy)" @onclick="DecodeAsync" data-testid="decode-photo">Read Barcode Photo</button>
+        </div>
 
         <div class="esb-form-row">
             <div class="esb-field">
@@ -177,6 +184,8 @@
     private string? _message;
     private bool _isError;
     private GenerateResult? _resultSummary;
+    private ElementReference _imageInput;
+    private bool _importSupported;
 
     private List<GenerationTarget> AllTargets()
     {
@@ -208,13 +217,34 @@
         _ => "Wired",
     };
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         Devices.Changed += OnChanged;
         Bluetooth.Changed += OnChanged;
+        _importSupported = await Importer.IsSupportedAsync();
     }
 
     private async void OnChanged() => await InvokeAsync(StateHasChanged);
+
+    private async Task DecodeAsync()
+    {
+        _busy = true;
+        try
+        {
+            var found = await Importer.DecodeAsync(_imageInput);
+            _options.Data = found.Data;
+            _options.Type = found.Format switch
+            {
+                "qr_code" => BarcodeKind.Qr, "code_128" => BarcodeKind.Code128, "code_39" => BarcodeKind.Code39,
+                "ean_13" => BarcodeKind.Ean13, "ean_8" => BarcodeKind.Ean8, "upc_a" => BarcodeKind.UpcA,
+                _ => _options.Type,
+            };
+            _message = $"Read {found.Format}; review the data, then send.";
+            _isError = false;
+        }
+        catch (Exception ex) { _message = ex.Message; _isError = true; }
+        finally { _busy = false; }
+    }
 
     private void ToggleTarget(string id, bool selected)
     {

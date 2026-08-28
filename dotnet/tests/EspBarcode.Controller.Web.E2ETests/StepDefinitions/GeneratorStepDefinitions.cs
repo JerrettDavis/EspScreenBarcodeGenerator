@@ -81,5 +81,21 @@ public class GeneratorStepDefinitions(TestWorld world)
         await Assertions.Expect(Page.Locator("[data-testid=library-table]")).ToContainTextAsync(name);
     }
 
+    [When("I upload a barcode photo to the generator")]
+    public async Task WhenIUploadPhotoToGenerator()
+    {
+        await GotoGeneratorAsync();
+        await Page.Locator("[data-testid=barcode-photo]").SetInputFilesAsync(TestWorld.SampleImagePath);
+        await Page.Locator("[data-testid=decode-photo]").ClickAsync();
+    }
+
+    [Then("the generator barcode type is {string}")]
+    public async Task ThenGeneratorTypeIs(string type)
+        => await Assertions.Expect(Page.Locator("[data-testid=generator-type]")).ToHaveValueAsync(type);
+
+    [Then("the generator data is {string}")]
+    public async Task ThenGeneratorDataIs(string data)
+        => await Assertions.Expect(Page.Locator("[data-testid=generator-data]")).ToHaveValueAsync(data);
+
     private async Task GotoGeneratorAsync() => await Page.GoToSpaAsync("generator", "Generator");
 }

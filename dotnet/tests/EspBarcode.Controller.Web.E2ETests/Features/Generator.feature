@@ -41,3 +41,8 @@ Feature: Barcode generator
     And I select the first paired gateway generator target
     And I click Generate & Push
     Then the generator reports it pushed to 1 device(s)
+
+  Scenario: Importing a QR photo prefills a clean request
+    When I upload a barcode photo to the generator
+    Then the generator barcode type is "Qr"
+    And the generator data is "PHOTO-QR-001"
